@@ -1,0 +1,39 @@
+# Usługa systemd dla adGen Finanse.
+# Instalacja:
+#   sudo cp deploy/adgen-finanse.service /etc/systemd/system/
+#   (dostosuj User, WorkingDirectory i ścieżkę do npm/node poniżej)
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now adgen-finanse
+# Logi:   journalctl -u adgen-finanse -f
+# Restart: sudo systemctl restart adgen-finanse
+
+[Unit]
+Description=adGen Finanse (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+# konto bez uprawnień roota (utwórz np. `adduser --system --group adgen`)
+User=adgen
+Group=adgen
+WorkingDirectory=/var/www/adgen-finanse
+
+# Wczytaj zmienne z pliku .env (DATABASE_URL, AUTH_SECURE_COOKIE, PORT, NODE_ENV)
+EnvironmentFile=/var/www/adgen-finanse/.env
+
+# Nasłuch tylko na loopbacku — na zewnątrz wystawia `tailscale serve` (HTTPS).
+# Jeśli łączysz się po tailnecie bez `tailscale serve`, zmień na 0.0.0.0
+# i ZABLOKUJ port 3000 na publicznym interfejsie (patrz docs/DEPLOYMENT.md).
+ExecStart=/usr/bin/npm run start -- -H 127.0.0.1 -p ${PORT}
+
+Restart=on-failure
+RestartSec=5
+
+# Utwardzenie
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

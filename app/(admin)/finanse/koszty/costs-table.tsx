@@ -1,0 +1,605 @@
+"use client";
+
+import { useMemo, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { ColumnDef } from "@tanstack/react-table";
+import {
+  CircleX,
+  Download,
+  Paperclip,
+  Pencil,
+  Plus,
+  Repeat,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import { toast } from "sonner";
+import { DataTable, SortableHeader } from "@/components/data-table";
+import { DetailSheet, DetailRow } from "@/components/detail-sheet";
+import { EmptyState } from "@/components/empty-state";
+import { KpiCard } from "@/components/kpi-card";
+import { PeriodFilter } from "@/components/period-filter";
+import { StatusBadge, costTone } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { TableCell } from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  daysOverdue,
+  formatDate,
+  formatMoney,
+  pluralPl,
+  todayUTC,
+} from "@/lib/format";
+import { COST_APPROVAL_LABELS, VAT_RATE_LABELS, isVatRate } from "@/lib/types";
+import type { ActionResult } from "@/lib/action-result";
+import {
+  deleteCostAction,
+  togglePaidAction,
+  toggleApprovalAction,
+} from "./actions";
+import { CostFormDialog, type SelectOption } from "./cost-form";
+import { RecurringCostsDialog, type RecurringRow } from "./recurring-dialog";
+
+export interface CostRow {
+  id: string;
+  supplierName: string;
+  supplierAccount: string | null;
+  docNumber: string;
+  docDate: string; // ISO
+  dueDate: string | null; // ISO
+  netGr: number;
+  vatRate: string;
+  vatGr: number;
+  grossGr: number;
+  categoryId: string;
+  categoryName: string;
+  clientId: string | null;
+  clientName: string | null;
+  paid: boolean;
+  approvedForPayment: boolean;
+  paidDate: string | null; // ISO
+  note: string | null;
+  attachmentName: string | null;
+  recurringCostId: string | null;
+}
+
+/** Etykieta statusu akceptacji płatności kosztu */
+function costApprovalLabel(cost: CostRow): string {
+  if (cost.paid) return COST_APPROVAL_LABELS.PAID;
+  if (cost.approvedForPayment) return COST_APPROVAL_LABELS.APPROVED;
+  return COST_APPROVAL_LABELS.NONE;
+}
+
+/** Znacznik przypisania kosztu: klient albo „Koszt ogólny" */
+function AssignmentBadge({ clientName }: { clientName: string | null }) {
+  if (clientName) return <span>{clientName}</span>;
+  return <StatusBadge tone="neutral">Koszt ogólny</StatusBadge>;
+}
+
+export function CostsTable({
+  costs,
+  categories,
+  clients,
+  supplierNames,
+  templates,
+}: {
+  costs: CostRow[];
+  categories: SelectOption[];
+  clients: SelectOption[];
+  supplierNames: string[];
+  templates: RecurringRow[];
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState("");
+  const [detail, setDetail] = useState<CostRow | null>(null);
+  const [toDelete, setToDelete] = useState<CostRow | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const kategoria = searchParams.get("kategoria") ?? "all";
+  const przypisanie = searchParams.get("przypisanie") ?? "all";
+  const platnosc = searchParams.get("platnosc") ?? "all";
+
+  function setParam(key: string, value: string | null) {
+    const next = new URLSearchParams(searchParams.toString());
+    if (value === null) next.delete(key);
+    else next.set(key, value);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }
+
+  // wyszukiwarka dostawca / nr dokumentu — filtr po stronie klienta
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    if (!q) return costs;
+    return costs.filter(
+      (c) =>
+        c.supplierName.toLowerCase().includes(q) ||
+        c.docNumber.toLowerCase().includes(q)
+    );
+  }, [costs, search]);
+
+  const totals = useMemo(
+    () =>
+      filtered.reduce(
+        (acc, c) => ({
+          netGr: acc.netGr + c.netGr,
+          vatGr: acc.vatGr + c.vatGr,
+          grossGr: acc.grossGr + c.grossGr,
+        }),
+        { netGr: 0, vatGr: 0, grossGr: 0 }
+      ),
+    [filtered]
+  );
+
+  // KPI: netto (okres), do zapłaty (niezapłacone brutto), zaległe (po terminie)
+  const kpi = useMemo(() => {
+    const today = todayUTC();
+    let unpaidGrossGr = 0;
+    let overdueGrossGr = 0;
+    let overdueCount = 0;
+    for (const c of filtered) {
+      if (c.paid) continue;
+      unpaidGrossGr += c.grossGr;
+      if (c.dueDate && daysOverdue(new Date(c.dueDate), today) > 0) {
+        overdueGrossGr += c.grossGr;
+        overdueCount += 1;
+      }
+    }
+    return { unpaidGrossGr, overdueGrossGr, overdueCount };
+  }, [filtered]);
+
+  function runAction(action: () => Promise<ActionResult>) {
+    startTransition(async () => {
+      const result = await action();
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
+    });
+  }
+
+  function confirmDelete() {
+    if (!toDelete) return;
+    const id = toDelete.id;
+    startTransition(async () => {
+      const result = await deleteCostAction(id);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
+      setToDelete(null);
+      setDetail(null);
+    });
+  }
+
+  const columns: ColumnDef<CostRow>[] = useMemo(
+    () => [
+      {
+        id: "approval",
+        header: "Status",
+        cell: ({ row }) => {
+          const c = row.original;
+          return (
+            <StatusBadge tone={costTone(c.paid, c.approvedForPayment)}>
+              {costApprovalLabel(c)}
+            </StatusBadge>
+          );
+        },
+      },
+      {
+        accessorKey: "docDate",
+        header: ({ column }) => (
+          <SortableHeader column={column}>Data dokumentu</SortableHeader>
+        ),
+        cell: ({ row }) => formatDate(new Date(row.original.docDate)),
+      },
+      {
+        accessorKey: "supplierName",
+        header: ({ column }) => (
+          <SortableHeader column={column}>Dostawca</SortableHeader>
+        ),
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5">
+            <span className="font-medium">{row.original.supplierName}</span>
+            {row.original.attachmentName && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <a
+                      href={`/api/zalaczniki/${row.original.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-muted-foreground hover:text-foreground"
+                      aria-label={`Załącznik: ${row.original.attachmentName}`}
+                    >
+                      <Paperclip className="size-3.5" />
+                    </a>
+                  </TooltipTrigger>
+                  <TooltipContent>{row.original.attachmentName}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+            {row.original.recurringCostId && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Repeat className="size-3.5 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Koszt cykliczny — wygenerowany z szablonu
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </div>
+        ),
+      },
+      {
+        accessorKey: "categoryName",
+        header: ({ column }) => (
+          <SortableHeader column={column}>Kategoria</SortableHeader>
+        ),
+      },
+      {
+        accessorKey: "clientName",
+        header: "Przypisanie",
+        cell: ({ row }) => (
+          <AssignmentBadge clientName={row.original.clientName} />
+        ),
+      },
+      {
+        accessorKey: "netGr",
+        header: ({ column }) => (
+          <SortableHeader column={column} align="right">
+            Netto
+          </SortableHeader>
+        ),
+        meta: { align: "right" },
+        cell: ({ row }) => formatMoney(row.original.netGr),
+      },
+      {
+        accessorKey: "grossGr",
+        header: ({ column }) => (
+          <SortableHeader column={column} align="right">
+            Brutto
+          </SortableHeader>
+        ),
+        meta: { align: "right" },
+        cell: ({ row }) => formatMoney(row.original.grossGr),
+      },
+      {
+        accessorKey: "dueDate",
+        header: ({ column }) => (
+          <SortableHeader column={column}>Termin</SortableHeader>
+        ),
+        cell: ({ row }) => {
+          const c = row.original;
+          if (!c.dueDate) return "—";
+          const overdue =
+            !c.paid && daysOverdue(new Date(c.dueDate), todayUTC()) > 0;
+          return (
+            <span className={overdue ? "font-medium text-red-600 dark:text-red-400" : undefined}>
+              {formatDate(new Date(c.dueDate))}
+            </span>
+          );
+        },
+      },
+    ],
+    []
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <KpiCard
+          label="Suma kosztów netto (okres)"
+          value={formatMoney(totals.netGr)}
+          sub={`${filtered.length} ${pluralPl(filtered.length, "pozycja", "pozycje", "pozycji")}`}
+        />
+        <KpiCard
+          label="Do zapłaty (brutto)"
+          value={formatMoney(kpi.unpaidGrossGr)}
+          sub="Niezapłacone koszty w okresie"
+          tone={kpi.unpaidGrossGr > 0 ? "warning" : "default"}
+        />
+        <KpiCard
+          label="Zaległe (po terminie)"
+          value={formatMoney(kpi.overdueGrossGr)}
+          sub={`${kpi.overdueCount} ${pluralPl(kpi.overdueCount, "pozycja", "pozycje", "pozycji")} po terminie`}
+          tone={kpi.overdueGrossGr > 0 ? "negative" : "default"}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <PeriodFilter />
+        <Select
+          value={kategoria}
+          onValueChange={(v) => setParam("kategoria", v === "all" ? null : v)}
+        >
+          <SelectTrigger className="w-44" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Wszystkie kategorie</SelectItem>
+            {categories.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={przypisanie}
+          onValueChange={(v) => setParam("przypisanie", v === "all" ? null : v)}
+        >
+          <SelectTrigger className="w-44" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Wszystkie przypisania</SelectItem>
+            <SelectItem value="ogolny">Koszt ogólny</SelectItem>
+            {clients.map((c) => (
+              <SelectItem key={c.id} value={c.id}>
+                {c.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={platnosc}
+          onValueChange={(v) => setParam("platnosc", v === "all" ? null : v)}
+        >
+          <SelectTrigger className="w-40" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Wszystkie płatności</SelectItem>
+            <SelectItem value="zaplacone">Zapłacone</SelectItem>
+            <SelectItem value="niezaplacone">Niezapłacone</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input
+          placeholder="Szukaj: dostawca, nr dokumentu…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-60"
+        />
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <a href={`/api/eksport/koszty?${searchParams.toString()}`}>
+              <Download className="size-4" /> Eksport CSV
+            </a>
+          </Button>
+          <RecurringCostsDialog
+            templates={templates}
+            trigger={
+              <Button variant="outline" size="sm">
+                <Repeat className="size-4" /> Koszty cykliczne
+              </Button>
+            }
+          />
+          <CostFormDialog
+            categories={categories}
+            clients={clients}
+            supplierNames={supplierNames}
+            trigger={
+              <Button size="sm">
+                <Plus className="size-4" /> Nowy koszt
+              </Button>
+            }
+          />
+        </div>
+      </div>
+
+      <DataTable
+        columns={columns}
+        data={filtered}
+        initialSorting={[{ id: "docDate", desc: true }]}
+        onRowClick={(row) => setDetail(row)}
+        footer={
+          <>
+            <TableCell colSpan={5} className="font-medium">
+              Suma ({filtered.length}{" "}
+              {pluralPl(filtered.length, "pozycja", "pozycje", "pozycji")})
+            </TableCell>
+            <TableCell className="text-right font-medium tabular-nums">
+              {formatMoney(totals.netGr)}
+            </TableCell>
+            <TableCell className="text-right font-medium tabular-nums">
+              {formatMoney(totals.grossGr)}
+            </TableCell>
+            <TableCell />
+          </>
+        }
+        emptyState={
+          <EmptyState
+            title="Brak kosztów w wybranym okresie"
+            description="Dodaj fakturę kosztową przyciskiem „Nowy koszt” albo zmień filtry okresu, kategorii lub przypisania."
+          >
+            <CostFormDialog
+              categories={categories}
+              clients={clients}
+              supplierNames={supplierNames}
+              trigger={
+                <Button size="sm">
+                  <Plus className="size-4" /> Nowy koszt
+                </Button>
+              }
+            />
+          </EmptyState>
+        }
+      />
+
+      {/* ── Panel szczegółów kosztu ─────────────────────────────── */}
+      <DetailSheet
+        open={detail !== null}
+        onOpenChange={(open) => !open && setDetail(null)}
+        title={detail?.supplierName ?? "Koszt"}
+        description={
+          detail ? `${detail.docNumber} · ${detail.categoryName}` : undefined
+        }
+        footer={
+          detail && (
+            <div className="flex flex-wrap items-center gap-2">
+              <CostFormDialog
+                cost={detail}
+                categories={categories}
+                clients={clients}
+                supplierNames={supplierNames}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    <Pencil className="size-4" /> Edytuj
+                  </Button>
+                }
+              />
+              {!detail.paid &&
+                (detail.approvedForPayment ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => runAction(() => toggleApprovalAction(detail.id))}
+                  >
+                    <CircleX className="size-4" /> Cofnij do „Brak działań”
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => runAction(() => toggleApprovalAction(detail.id))}
+                  >
+                    <Wallet className="size-4" /> Można płacić
+                  </Button>
+                ))}
+              <Button
+                size="sm"
+                disabled={pending}
+                onClick={() => runAction(() => togglePaidAction(detail.id))}
+              >
+                {detail.paid ? (
+                  <>
+                    <CircleX className="size-4" /> Cofnij zapłatę
+                  </>
+                ) : (
+                  <>
+                    <Wallet className="size-4" /> Oznacz zapłacony
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto text-destructive hover:text-destructive"
+                onClick={() => setToDelete(detail)}
+              >
+                <Trash2 className="size-4" /> Usuń
+              </Button>
+            </div>
+          )
+        }
+      >
+        {detail && (
+          <div className="space-y-1">
+            <DetailRow label="Status">
+              <StatusBadge tone={costTone(detail.paid, detail.approvedForPayment)}>
+                {costApprovalLabel(detail)}
+              </StatusBadge>
+            </DetailRow>
+            <DetailRow label="Dostawca">{detail.supplierName}</DetailRow>
+            <DetailRow label="Nr rachunku dostawcy">
+              {detail.supplierAccount ?? "—"}
+            </DetailRow>
+            <DetailRow label="Nr dokumentu">{detail.docNumber}</DetailRow>
+            <DetailRow label="Data dokumentu">
+              {formatDate(new Date(detail.docDate))}
+            </DetailRow>
+            <DetailRow label="Termin płatności">
+              {detail.dueDate ? formatDate(new Date(detail.dueDate)) : "—"}
+            </DetailRow>
+            <DetailRow label="Kategoria">{detail.categoryName}</DetailRow>
+            <DetailRow label="Przypisanie">
+              <AssignmentBadge clientName={detail.clientName} />
+            </DetailRow>
+            <DetailRow label="Netto">{formatMoney(detail.netGr)}</DetailRow>
+            <DetailRow label="VAT">
+              {isVatRate(detail.vatRate)
+                ? `${formatMoney(detail.vatGr)} (${VAT_RATE_LABELS[detail.vatRate]})`
+                : formatMoney(detail.vatGr)}
+            </DetailRow>
+            <DetailRow label="Brutto">{formatMoney(detail.grossGr)}</DetailRow>
+            <DetailRow label="Data zapłaty">
+              {detail.paidDate ? formatDate(new Date(detail.paidDate)) : "—"}
+            </DetailRow>
+            {detail.recurringCostId && (
+              <DetailRow label="Koszt cykliczny">
+                <StatusBadge tone="indigo">Z szablonu</StatusBadge>
+              </DetailRow>
+            )}
+            {detail.attachmentName && (
+              <DetailRow label="Załącznik">
+                <a
+                  href={`/api/zalaczniki/${detail.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-primary hover:underline"
+                >
+                  <Paperclip className="size-3.5" /> {detail.attachmentName}
+                </a>
+              </DetailRow>
+            )}
+            {detail.note && (
+              <div className="pt-3">
+                <div className="text-sm text-muted-foreground">Notatka</div>
+                <p className="mt-1 text-sm whitespace-pre-wrap">{detail.note}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </DetailSheet>
+
+      <AlertDialog
+        open={toDelete !== null}
+        onOpenChange={(open) => !open && setToDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunąć koszt?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Koszt „{toDelete?.docNumber}” od {toDelete?.supplierName} zostanie
+              trwale usunięty wraz z załącznikiem. Tej operacji nie można
+              cofnąć.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} disabled={pending}>
+              {pending ? "Usuwanie…" : "Usuń"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

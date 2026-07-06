@@ -1,0 +1,231 @@
+// System finansowy adGen — schemat bazy danych
+// SQLite (łatwa migracja do Postgresa: brak enumów — statusy jako String + stałe TS,
+// kwoty w groszach jako Int, daty jako DateTime)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── Użytkownicy i sesje ──────────────────────────────────────────────
+
+model User {
+  id                 String    @id @default(cuid())
+  name               String
+  email              String    @unique
+  passwordHash       String
+  role               String    @default("EMPLOYEE") // ADMIN | EMPLOYEE
+  active             Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  monthlyBudgetGr    Int? // założenie miesięczne (budżet wypłaty) do rozliczenia zespołu
+  createdAt          DateTime  @default(now())
+
+  sessions    Session[]
+  rates       HourlyRate[]
+  timeEntries TimeEntry[]
+  activeTimer ActiveTimer?
+}
+
+model Session {
+  id        String   @id // losowy token
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Historia stawek kosztowych — stawka obowiązuje od validFrom (włącznie)
+model HourlyRate {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ratePerHourGr Int // grosze za godzinę
+  validFrom     DateTime
+  createdAt     DateTime @default(now())
+
+  @@index([userId, validFrom])
+}
+
+// ── Klienci ──────────────────────────────────────────────────────────
+
+model Client {
+  id                String    @id @default(cuid())
+  name              String
+  nip               String?
+  contactPerson     String?
+  email             String?
+  phone             String?
+  address           String?
+  billingModel      String    @default("ABONAMENT") // ABONAMENT | PROJEKT | SUCCESS_FEE
+  monthlyRetainerGr Int? // MRR w groszach (dla modelu abonamentowego)
+  offerTags         String? // tagi oferty rozdzielone przecinkami, np. "META ADS ABO,PAKIETY LEADÓW"
+  status            String    @default("ACTIVE") // ACTIVE | ENDED
+  startDate         DateTime?
+  notes             String?
+  createdAt         DateTime  @default(now())
+
+  invoices       Invoice[]
+  costs          Cost[]
+  timeEntries    TimeEntry[]
+  recurringCosts RecurringCost[]
+  activeTimers   ActiveTimer[]
+  planNotes      RevenuePlanNote[]
+}
+
+// ── Faktury sprzedażowe (przychody) ─────────────────────────────────
+
+model Invoice {
+  id        String    @id @default(cuid())
+  number    String?   @unique // opcjonalny — „bez fv" gdy faktura jeszcze niewystawiona
+  label     String? // opis pozycji przychodu, np. „Votum | SKD"
+  offerTags String? // tagi oferty na wierszu, po przecinku
+  clientId  String
+  client    Client    @relation(fields: [clientId], references: [id])
+  issueDate DateTime // data wystawienia
+  saleDate  DateTime // data sprzedaży — do tego miesiąca liczony przychód
+  dueDate   DateTime // termin płatności
+  status    String    @default("DRAFT") // DRAFT(bez fv) | ISSUED(wysłana) | PAID(opłacona) | OVERDUE(przeterminowana)
+  paidDate  DateTime?
+  netGr     Int       @default(0) // kwota netto (zdenormalizowana; suma pozycji jeśli istnieją)
+  vatGr     Int       @default(0)
+  grossGr   Int       @default(0)
+  notes     String?
+  createdAt DateTime  @default(now())
+
+  items InvoiceItem[]
+
+  @@index([clientId])
+  @@index([saleDate])
+  @@index([status])
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  name      String
+  quantity  Float // ilość (np. 1.5) — kwoty liczone raz i zapisywane w groszach
+  unitNetGr Int // cena jedn. netto w groszach
+  vatRate   String  @default("23") // 23 | 8 | 5 | 0 | ZW
+  netGr     Int // zaokrąglone: quantity × unitNetGr
+  vatGr     Int
+  grossGr   Int
+  position  Int     @default(0)
+}
+
+// ── Koszty ───────────────────────────────────────────────────────────
+
+model CostCategory {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  position Int     @default(0)
+  isSalary Boolean @default(false) // kategoria wynagrodzeń: rozliczana kosztem pracy z godzin, poza alokacją
+
+  costs          Cost[]
+  recurringCosts RecurringCost[]
+}
+
+model Cost {
+  id                String    @id @default(cuid())
+  supplierName      String
+  supplierAccount   String? // nr rachunku (NRB, 26 cyfr) — wymagany do eksportu Elixir
+  docNumber         String
+  docDate           DateTime // data dokumentu — do tego miesiąca liczony koszt
+  dueDate           DateTime? // termin płatności (moduł Płatności)
+  netGr             Int
+  vatRate           String    @default("23") // 23 | 8 | 5 | 0 | ZW
+  vatGr             Int
+  grossGr           Int
+  categoryId        String
+  category          CostCategory @relation(fields: [categoryId], references: [id])
+  clientId          String? // null = koszt ogólny firmy
+  client            Client?   @relation(fields: [clientId], references: [id])
+  paid              Boolean   @default(false)
+  paidDate          DateTime?
+  approvedForPayment Boolean  @default(false) // "Można płacić" — zatwierdzenie do płatności (dwustopniowy flow)
+  needsConfirmation Boolean   @default(false) // kopia z kosztu cyklicznego czeka na zatwierdzenie
+  note              String?
+  attachmentPath    String? // ścieżka w /uploads
+  attachmentName    String? // oryginalna nazwa pliku
+  recurringCostId   String?
+  recurringCost     RecurringCost? @relation(fields: [recurringCostId], references: [id], onDelete: SetNull)
+  createdAt         DateTime  @default(now())
+
+  @@index([docDate])
+  @@index([clientId])
+  @@index([categoryId])
+  @@index([paid])
+}
+
+// Szablon kosztu cyklicznego — 1. dnia miesiąca (generowanie leniwe przy
+// wejściu na stronę Kosztów/Płatności) tworzy kopię Cost z needsConfirmation=true
+model RecurringCost {
+  id                  String  @id @default(cuid())
+  active              Boolean @default(true)
+  supplierName        String
+  supplierAccount     String?
+  docNumber           String? // baza numeru dokumentu, np. "Abonament {MM/RRRR}"
+  netGr               Int
+  vatRate             String  @default("23")
+  categoryId          String
+  category            CostCategory @relation(fields: [categoryId], references: [id])
+  clientId            String?
+  client              Client? @relation(fields: [clientId], references: [id])
+  dueDayOfMonth       Int     @default(10) // dzień miesiąca jako termin płatności kopii
+  note                String?
+  lastGeneratedPeriod String? // "RRRR-MM" ostatnio wygenerowanego miesiąca
+  createdAt           DateTime @default(now())
+
+  costs Cost[]
+}
+
+// ── Czas pracy ───────────────────────────────────────────────────────
+
+model TimeEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  date        DateTime
+  minutes     Int // czas w minutach (1,5 h = 90)
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, date])
+  @@index([clientId, date])
+}
+
+model ActiveTimer {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  description String?
+  startedAt   DateTime @default(now())
+}
+
+// Miesięczna uwaga do klienta w planie przychodów (np. "w tym miesiącu brak prowizji")
+model RevenuePlanNote {
+  id       String @id @default(cuid())
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  period   String // "RRRR-MM"
+  note     String
+
+  @@unique([clientId, period])
+}
+
+// ── Ustawienia (klucz-wartość) ───────────────────────────────────────
+
+model Setting {
+  key   String @id
+  value String
+}
