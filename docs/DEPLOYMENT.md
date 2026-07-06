@@ -1,5 +1,30 @@
 # Wdrożenie — OVH + Tailscale
 
+## Aktualne wdrożenie (live)
+
+Adres: **https://businessbrain.tail394d08.ts.net:8443** (tylko w tailnecie).
+
+| Element | Wartość |
+|---|---|
+| Serwer | OVH VPS `51.210.177.152`, użytkownik `ubuntu`, Ubuntu 24.04 |
+| Węzeł Tailscale | `businessbrain.tail394d08.ts.net` |
+| Katalog aplikacji | `/opt/adgen-finanse` |
+| Baza | `/opt/adgen-finanse/prisma/adgen.db` (SQLite) |
+| Usługa | `systemctl {status,restart} adgen-finanse` (nasłuch `127.0.0.1:3001`) |
+| Wystawienie | `tailscale serve --https=8443 http://127.0.0.1:3001` |
+
+> Uwaga: na tym VPS działa też druga aplikacja **businessbrain** (Docker: front
+> `:3000`, API `:8000`, Postgres `:5432`), wystawiona przez Tailscale na `:443`
+> (`/` i `/api`). Dlatego adGen używa portu **3001** i wystawienia na **:8443** —
+> nie kolidują. Nie zmieniaj serve na `:443`.
+
+Aktualizacja live: `cd /opt/adgen-finanse && ./deploy/update.sh`
+(używa istniejącej usługi i portu z `.env`).
+
+---
+
+## Instrukcja generyczna (od zera)
+
 Instrukcja wdrożenia adGen Finanse na serwerze OVH, z dostępem dla zespołu przez
 sieć **Tailscale** (tailnet). Ruch po tailnecie jest szyfrowany (WireGuard), więc
 aplikacji **nie wystawiamy do publicznego internetu** — logujecie się pod adresem
