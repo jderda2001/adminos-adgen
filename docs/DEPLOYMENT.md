@@ -2,21 +2,28 @@
 
 ## Aktualne wdrożenie (live)
 
-Adres: **https://businessbrain.tail394d08.ts.net:8443** (tylko w tailnecie).
+Adres: **https://adminos.tail394d08.ts.net** (tylko w tailnecie).
 
 | Element | Wartość |
 |---|---|
 | Serwer | OVH VPS `51.210.177.152`, użytkownik `ubuntu`, Ubuntu 24.04 |
-| Węzeł Tailscale | `businessbrain.tail394d08.ts.net` |
+| Węzeł Tailscale | `adminos.tail394d08.ts.net` (osobny węzeł, IP 100.66.233.54) |
 | Katalog aplikacji | `/opt/adgen-finanse` |
 | Baza | `/opt/adgen-finanse/prisma/adgen.db` (SQLite) |
-| Usługa | `systemctl {status,restart} adgen-finanse` (nasłuch `127.0.0.1:3001`) |
-| Wystawienie | `tailscale serve --https=8443 http://127.0.0.1:3001` |
+| Usługa aplikacji | `systemctl {status,restart} adgen-finanse` (nasłuch `127.0.0.1:3001`) |
+| Drugi daemon Tailscale | `systemctl … tailscaled-adgen` (`--statedir=/var/lib/tailscale-adgen`, `--socket=/run/tailscale-adgen/tailscaled.sock`) |
+| Wystawienie | `tailscale --socket=/run/tailscale-adgen/tailscaled.sock serve --https=443 http://127.0.0.1:3001` |
 
-> Uwaga: na tym VPS działa też druga aplikacja **businessbrain** (Docker: front
-> `:3000`, API `:8000`, Postgres `:5432`), wystawiona przez Tailscale na `:443`
-> (`/` i `/api`). Dlatego adGen używa portu **3001** i wystawienia na **:8443** —
-> nie kolidują. Nie zmieniaj serve na `:443`.
+> **Rozdzielenie od businessbrain:** na tym VPS działa też druga aplikacja
+> **businessbrain** (Docker: front `:3000`, API `:8000`, Postgres `:5432`) na
+> OSOBNYM węźle Tailscale `businessbrain` (`:443`, `/` i `/api`). adGen ma
+> **własny węzeł `adminos`** (drugi `tailscaled` w trybie userspace) i własny
+> adres — projekty są w pełni rozdzielone. Nie ruszaj portu 3000 ani węzła
+> businessbrain.
+>
+> Uwaga do drugiego węzła: `tailscaled` MUSI dostać `--statedir` (nie tylko
+> `--state`), inaczej brak katalogu na certy TLS („no TailscaleVarRoot") i HTTPS
+> nie wstanie.
 
 Aktualizacja live: `cd /opt/adgen-finanse && ./deploy/update.sh`
 (używa istniejącej usługi i portu z `.env`).
