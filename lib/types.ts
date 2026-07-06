@@ -16,12 +16,18 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   OVERDUE: "Przeterminowana",
 };
 
-export const BILLING_MODELS = ["ABONAMENT", "PROJEKT", "SUCCESS_FEE"] as const;
+export const BILLING_MODELS = [
+  "ABONAMENT",
+  "PROJEKT",
+  "SUCCESS_FEE",
+  "PAKIETY_LEADOW",
+] as const;
 export type BillingModel = (typeof BILLING_MODELS)[number];
 export const BILLING_MODEL_LABELS: Record<BillingModel, string> = {
   ABONAMENT: "Abonament",
   PROJEKT: "Projektowy",
   SUCCESS_FEE: "Success fee",
+  PAKIETY_LEADOW: "Paczki leadów",
 };
 
 export const CLIENT_STATUSES = ["ACTIVE", "ENDED"] as const;
