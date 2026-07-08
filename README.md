@@ -26,6 +26,11 @@ Logowanie po seedzie:
 Wersja produkcyjna: `npm run build && npm start`. Za HTTPS ustaw zmienną
 `AUTH_SECURE_COOKIE=1`, aby ciasteczko sesji było wysyłane tylko po TLS.
 
+**Tryb bez haseł (sieć zamknięta):** `AUTH_DISABLED=1` wyłącza logowanie —
+każdy, kto dotrze do aplikacji, działa jako administrator. Używać wyłącznie,
+gdy aplikacja jest osiągalna tylko w tailnecie (Tailscale), nigdy publicznie.
+Zmiana env + restart przywraca hasła.
+
 ## Stack
 
 - **Next.js 16** (App Router) + TypeScript
@@ -51,6 +56,14 @@ Proxy (`proxy.ts`) sprawdza tylko obecność sesji; role weryfikuje serwer.
 
 ## Moduły
 
+- **Rachunek wyników** (najważniejsza zakładka) — pełny RW firmy liczony
+  automatycznie z importowanych CSV (formaty arkusza „Rachunek wyników" adGen:
+  przychody per typ, koszty per kategoria). Sekcje jak w arkuszu: Przychody,
+  Koszty produkcyjne (delivery), Marketing i sprzedaż (growth), Overhead,
+  Odłożone środki, Wynik finansowy (Zysk, CIT, Marża I/II vs cel 10%),
+  LIVE BOA, metryki ręczne (estymacja zysku, nowi klienci → CAC, windykacja,
+  ETH…). Import z podglądem i historią partii (cofanie importu). Silnik
+  wyliczeń pokryty „złotym testem" odtwarzającym arkusz co do złotówki.
 - **Dashboard** — KPI (przychody, koszty, zysk, marża %, VAT do zapłaty,
   należności przeterminowane), przychody vs koszty (12 mies.), zysk i marża,
   Top 5 / dolna 3 klientów, struktura kosztów per kategoria.

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
+  LineChart,
   Wallet,
   CreditCard,
   TrendingUp,
@@ -26,7 +27,10 @@ type NavItem = {
 const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Przegląd",
-    items: [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }],
+    items: [
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/rachunek-wynikow", label: "Rachunek wyników", icon: LineChart },
+    ],
   },
   {
     label: "Finanse",
@@ -56,9 +60,12 @@ function initials(name: string): string {
 export function AppSidebar({
   userName,
   logoutAction,
+  showLogout = true,
 }: {
   userName: string;
   logoutAction: () => Promise<void>;
+  /** false gdy logowanie wyłączone (AUTH_DISABLED — sieć zamknięta) */
+  showLogout?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -140,16 +147,18 @@ export function AppSidebar({
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs font-medium">{userName}</div>
           </div>
-          <form action={logoutAction}>
-            <button
-              type="submit"
-              aria-label="Wyloguj się"
-              title="Wyloguj się"
-              className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            >
-              <LogOut className="size-4" />
-            </button>
-          </form>
+          {showLogout && (
+            <form action={logoutAction}>
+              <button
+                type="submit"
+                aria-label="Wyloguj się"
+                title="Wyloguj się"
+                className="grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </aside>

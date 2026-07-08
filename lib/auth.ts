@@ -9,6 +9,16 @@ import { db } from "./db";
 export const SESSION_COOKIE = "adgen_session";
 const SESSION_DAYS = 30;
 
+/**
+ * AUTH_DISABLED=1 wyłącza logowanie hasłem — każdy, kto dotrze do aplikacji,
+ * działa jako pierwszy aktywny administrator. Używać WYŁĄCZNIE, gdy aplikacja
+ * jest osiągalna tylko w zamkniętej sieci (Tailscale). Ustawienie odwracalne
+ * przez zmianę env i restart.
+ */
+export function isAuthDisabled(): boolean {
+  return process.env.AUTH_DISABLED === "1";
+}
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
@@ -55,6 +65,24 @@ export interface SessionUser {
 
 /** Zalogowany użytkownik albo null — wynik cache'owany w ramach żądania */
 export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
+  if (isAuthDisabled()) {
+    // sieć zamknięta: każdy działa jako pierwszy aktywny administrator
+    const admin = await db.user.findFirst({
+      where: { role: "ADMIN", active: true },
+      orderBy: { createdAt: "asc" },
+    });
+    if (admin) {
+      return {
+        id: admin.id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        mustChangePassword: false, // bez haseł nie wymuszamy ich zmiany
+      };
+    }
+    // brak konta admina (świeża baza) — przechodzimy do normalnego flow
+  }
+
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;

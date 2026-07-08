@@ -223,6 +223,56 @@ model RevenuePlanNote {
   @@unique([clientId, period])
 }
 
+// ── Rachunek wyników (RW) — najważniejszy moduł ─────────────────────
+// Dane kasowe importowane z CSV (przychody/koszty wg kategorii arkusza RW).
+// Kwoty w groszach: przychody dodatnie, koszty/odłożone/CIT ujemne.
+
+model RwImportBatch {
+  id        String   @id @default(cuid())
+  filename  String
+  kind      String // PRZYCHOD | KOSZT
+  year      Int
+  rowCount  Int
+  createdAt DateTime @default(now())
+
+  entries RwEntry[]
+}
+
+model RwEntry {
+  id          String  @id @default(cuid())
+  year        Int
+  month       Int // 1–12
+  kind        String // PRZYCHOD | KOSZT
+  category    String // kanoniczna nazwa kategorii z lib/rw-types (RW_CATEGORIES)
+  amountGr    Int // grosze; przychody +, koszty −
+  description String? // opis/klient z CSV (skrócony)
+  contractor  String? // kontrahent (koszty)
+  bank        String? // NestBank / mBank
+  note        String? // uwagi
+  source      String  @default("IMPORT") // IMPORT | MANUAL
+  batchId     String?
+  batch       RwImportBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([year, month])
+  @@index([year, kind, category])
+  @@index([batchId])
+}
+
+// Metryki uzupełniane ręcznie per miesiąc (estymacja zysku, ETH, windykacja,
+// leady, nowi klienci itd. — klucze w lib/rw-types RW_MANUAL_METRICS)
+model RwManualMetric {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int // 1–12
+  key       String
+  valueNum  Float? // wartości liczbowe (zł jako liczba zł, sztuki, %)
+  valueText String? // wartości opisowe (np. "2,19 ETH")
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month, key])
+}
+
 // ── Ustawienia (klucz-wartość) ───────────────────────────────────────
 
 model Setting {

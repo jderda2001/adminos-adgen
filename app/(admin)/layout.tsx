@@ -1,4 +1,4 @@
-import { requireAdmin } from "@/lib/auth";
+import { isAuthDisabled, requireAdmin } from "@/lib/auth";
 import { logoutAction } from "@/app/login/actions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ForcePasswordChange } from "@/components/force-password-change";
@@ -14,7 +14,11 @@ export default async function AdminLayout({
 
   return (
     <div className="flex min-h-screen bg-background">
-      <AppSidebar userName={user.name} logoutAction={logoutAction} />
+      <AppSidebar
+        userName={user.name}
+        logoutAction={logoutAction}
+        showLogout={!isAuthDisabled()}
+      />
       <main className="min-w-0 flex-1 px-6 py-6 lg:px-8">
         <div className="mx-auto max-w-[1400px]">
           {user.mustChangePassword ? <ForcePasswordChange /> : children}

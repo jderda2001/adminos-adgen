@@ -5,8 +5,19 @@ const SESSION_COOKIE = "adgen_session";
 // Proxy (dawne middleware) sprawdza tylko obecność ciasteczka sesji (brak dostępu do bazy).
 // Właściwa walidacja sesji i ról odbywa się serwerowo: requireUser()/requireAdmin()
 // w layoutach, akcjach serwerowych i route handlerach.
+//
+// AUTH_DISABLED=1 (sieć zamknięta, np. Tailscale): pomijamy wymóg sesji,
+// a /login przekierowuje od razu do aplikacji.
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const authDisabled = process.env.AUTH_DISABLED === "1";
+
+  if (authDisabled) {
+    if (pathname === "/login") {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
+  }
 
   const isPublic = pathname === "/login";
   const hasSession = request.cookies.has(SESSION_COOKIE);

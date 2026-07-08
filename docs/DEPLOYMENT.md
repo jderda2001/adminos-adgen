@@ -13,6 +13,7 @@ Adres: **https://adminos.tail394d08.ts.net** (tylko w tailnecie).
 | Usługa aplikacji | `systemctl {status,restart} adgen-finanse` (nasłuch `127.0.0.1:3001`) |
 | Drugi daemon Tailscale | `systemctl … tailscaled-adgen` (`--statedir=/var/lib/tailscale-adgen`, `--socket=/run/tailscale-adgen/tailscaled.sock`) |
 | Wystawienie | `tailscale --socket=/run/tailscale-adgen/tailscaled.sock serve --https=443 http://127.0.0.1:3001` |
+| Logowanie | `AUTH_DISABLED=1` w `.env` — bez haseł (dostęp tylko z tailnetu); usunięcie flagi + restart przywraca logowanie |
 
 > **Rozdzielenie od businessbrain:** na tym VPS działa też druga aplikacja
 > **businessbrain** (Docker: front `:3000`, API `:8000`, Postgres `:5432`) na
