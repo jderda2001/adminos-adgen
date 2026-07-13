@@ -50,7 +50,20 @@ export interface RwLiveBoa {
   operacyjne: number | null;
   zaliczkaCit: number | null;
   cit: number | null;
+  /** podatki (CIT) + wszystkie zaliczki (CIT + premie zespołu) jako udział w przychodzie */
+  podatkiIZaliczki: number | null;
 }
+
+/**
+ * Cele „BOA zaplanowane" — docelowy podział przychodu (jak arkusz).
+ * Sumują się do 100%. Live vs plan pokazujemy w karcie BOA.
+ */
+export const RW_BOA_TARGETS = {
+  oszczednosci: 0.09,
+  wlasciciele: 0.23,
+  operacyjne: 0.65,
+  podatkiIZaliczki: 0.03,
+} as const;
 
 export interface RwMonth {
   month: number; // 1–12
@@ -204,6 +217,9 @@ export function buildRwReport(
       cost(totals.costByCategory, "Premie zarządu");
     const oszczednosciGr = cost(totals.costByCategory, "Środki przelane na oszczędności");
     const zaliczkaCitGr = cost(totals.costByCategory, "Zaliczka na podatek CIT");
+    const zaliczkaPremieGr = cost(totals.costByCategory, "Zaliczka na premie zespołu");
+    // podatki + zaliczki: CIT (wiersz wyniku) + zaliczki (CIT i premie zespołu)
+    const podatkiIZaliczkiGr = totals.citGr + zaliczkaCitGr + zaliczkaPremieGr;
 
     const liveBoa: RwLiveBoa = {
       oszczednosci: ratio(-oszczednosciGr, totals.revenueTotalGr),
@@ -211,6 +227,7 @@ export function buildRwReport(
       operacyjne: ratio(-(totals.costsTotalGr - wlascicieleGr), totals.revenueTotalGr),
       zaliczkaCit: ratio(-zaliczkaCitGr, totals.revenueTotalGr),
       cit: ratio(-totals.citGr, totals.revenueTotalGr),
+      podatkiIZaliczki: ratio(-podatkiIZaliczkiGr, totals.revenueTotalGr),
     };
 
     // estymacja zysku w zł (metryka ręczna) → grosze

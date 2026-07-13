@@ -7,7 +7,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
  * Wysuwany panel szczegółów (prawa strona) — główny wzorzec „rozwinięcia"
@@ -33,7 +32,7 @@ export function DetailSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-md"
+        className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-md"
       >
         <SheetHeader className="border-b px-5 py-4">
           <SheetTitle className="text-base">{title}</SheetTitle>
@@ -41,9 +40,9 @@ export function DetailSheet({
             <SheetDescription>{description}</SheetDescription>
           )}
         </SheetHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="px-5 py-4">{children}</div>
-        </ScrollArea>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
+          {children}
+        </div>
         {footer && (
           <div className="border-t bg-muted/40 px-5 py-3">{footer}</div>
         )}

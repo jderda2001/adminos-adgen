@@ -5,6 +5,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -116,10 +117,9 @@ export function InviteMemberDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="invite-rate-from">Stawka obowiązuje od</Label>
-              <Input
+              <DatePicker
                 id="invite-rate-from"
                 name="rateFrom"
-                type="date"
                 defaultValue={dateToInput(todayUTC())}
               />
             </div>

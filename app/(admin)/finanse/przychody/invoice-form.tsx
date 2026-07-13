@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -234,21 +235,17 @@ export function InvoiceFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="saleDate">Data przychodu *</Label>
-              <Input
+              <DatePicker
                 id="saleDate"
                 name="saleDate"
-                type="date"
-                required
                 defaultValue={defaultSaleDate}
               />
             </div>
             <div className="space-y-2">
               <Label htmlFor="dueDate">Termin płatności *</Label>
-              <Input
+              <DatePicker
                 id="dueDate"
                 name="dueDate"
-                type="date"
-                required
                 defaultValue={defaultDueDate}
               />
             </div>

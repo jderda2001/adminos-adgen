@@ -74,6 +74,8 @@ describe("buildRwReport — formuły miesięczne", () => {
     expect(jan.liveBoa.operacyjne).toBeCloseTo(850_000 / 1_550_000, 10);
     expect(jan.liveBoa.zaliczkaCit).toBe(0);
     expect(jan.liveBoa.cit).toBeCloseTo(30_000 / 1_550_000, 10);
+    // podatki+zaliczki = CIT (30 000) + zaliczka CIT (0) + zaliczka premie zespołu (20 000)
+    expect(jan.liveBoa.podatkiIZaliczki).toBeCloseTo(50_000 / 1_550_000, 10);
   });
 
   it("odchylenie zysku = (realizacja − estymacja) / estymacja — konwencja arkusza", () => {

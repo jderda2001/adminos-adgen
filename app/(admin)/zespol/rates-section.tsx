@@ -8,6 +8,7 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
@@ -129,12 +130,10 @@ export function RatesSection({ member }: { member: MemberRow }) {
         </div>
         <div className="flex-1 space-y-1.5">
           <Label htmlFor={`rate-from-${member.id}`}>Obowiązuje od</Label>
-          <Input
+          <DatePicker
             id={`rate-from-${member.id}`}
             name="validFrom"
-            type="date"
             defaultValue={todayInput}
-            required
           />
         </div>
         <Button type="submit" size="sm" disabled={pending}>

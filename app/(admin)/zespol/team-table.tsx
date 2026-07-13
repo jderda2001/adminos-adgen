@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { ColumnDef } from "@tanstack/react-table";
-import Link from "next/link";
 import {
   KeyRound,
   MoreHorizontal,
@@ -10,7 +9,6 @@ import {
   Plus,
   UserCheck,
   UserX,
-  Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, SortableHeader } from "@/components/data-table";
@@ -279,11 +277,6 @@ export function TeamTable({
           className="h-8 w-72"
         />
         <div className="ml-auto flex items-center gap-2">
-          <Button asChild variant="outline" size="sm">
-            <Link href="/zespol/rozliczenie">
-              <Wallet className="size-4" /> Rozliczenie
-            </Link>
-          </Button>
           <InviteMemberDialog
             onInvited={(password, userName) =>
               setTempPassword({ password, userName })

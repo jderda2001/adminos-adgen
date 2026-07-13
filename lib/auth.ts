@@ -112,11 +112,16 @@ export async function requireUser(): Promise<SessionUser> {
 }
 
 /**
- * Wymaga roli ADMIN. Pracownik jest odsyłany do swojego panelu czasu —
- * egzekwowane na poziomie API (akcje serwerowe, route handlery), nie tylko UI.
+ * Wymaga roli ADMIN. Aplikacja jest w całości panelem finansowym (moduł czasu
+ * pracy usunięty), więc konto bez roli ADMIN nie ma dostępnych widoków —
+ * jest wylogowywane. Przy AUTH_DISABLED każdy działa jako admin, więc ta gałąź
+ * nie występuje w sieci zamkniętej.
  */
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role !== "ADMIN") redirect("/moj-czas");
+  if (user.role !== "ADMIN") {
+    await destroySession();
+    redirect("/login");
+  }
   return user;
 }

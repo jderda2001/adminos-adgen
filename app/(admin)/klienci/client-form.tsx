@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -211,10 +212,10 @@ export function ClientFormDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="startDate">Start współpracy</Label>
-              <Input
+              <DatePicker
                 id="startDate"
                 name="startDate"
-                type="date"
+                clearable
                 defaultValue={
                   client?.startDate ? dateToInput(new Date(client.startDate)) : ""
                 }

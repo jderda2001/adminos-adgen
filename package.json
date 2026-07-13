@@ -11,7 +11,8 @@
     "postinstall": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
-    "db:bootstrap": "tsx prisma/bootstrap.ts"
+    "db:bootstrap": "tsx prisma/bootstrap.ts",
+    "db:clear-demo": "tsx prisma/clear-demo.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
@@ -31,6 +32,7 @@
     "prisma": "^6.19.3",
     "radix-ui": "^1.6.1",
     "react": "19.2.4",
+    "react-day-picker": "^10.0.1",
     "react-dom": "19.2.4",
     "recharts": "^3.9.1",
     "shadcn": "^4.12.0",

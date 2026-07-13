@@ -5,6 +5,7 @@ import { Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -144,11 +145,9 @@ export function CostFormDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="docDate">Data dokumentu *</Label>
-              <Input
+              <DatePicker
                 id="docDate"
                 name="docDate"
-                type="date"
-                required
                 defaultValue={
                   cost ? dateToInput(new Date(cost.docDate)) : dateToInput(todayUTC())
                 }
@@ -156,10 +155,10 @@ export function CostFormDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="dueDate">Termin płatności</Label>
-              <Input
+              <DatePicker
                 id="dueDate"
                 name="dueDate"
-                type="date"
+                clearable
                 defaultValue={
                   cost?.dueDate ? dateToInput(new Date(cost.dueDate)) : ""
                 }
@@ -256,10 +255,10 @@ export function CostFormDialog({
             {paid && (
               <div className="space-y-2">
                 <Label htmlFor="paidDate">Data zapłaty</Label>
-                <Input
+                <DatePicker
                   id="paidDate"
                   name="paidDate"
-                  type="date"
+                  clearable
                   defaultValue={
                     cost?.paidDate
                       ? dateToInput(new Date(cost.paidDate))

@@ -21,7 +21,7 @@ import { KpiCard } from "@/components/kpi-card";
 import { StatusBadge, invoiceTone } from "@/components/status-badge";
 import { DetailSheet, DetailRow } from "@/components/detail-sheet";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/date-picker";
 import { Label } from "@/components/ui/label";
 import { TableCell } from "@/components/ui/table";
 import {
@@ -554,11 +554,10 @@ export function InvoicesTable({
             </p>
             <div className="space-y-2">
               <Label htmlFor="paidDate">Data zapłaty *</Label>
-              <Input
+              <DatePicker
                 id="paidDate"
-                type="date"
                 value={paidDate}
-                onChange={(e) => setPaidDate(e.target.value)}
+                onChange={setPaidDate}
               />
             </div>
           </div>

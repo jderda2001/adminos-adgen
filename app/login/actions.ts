@@ -78,7 +78,7 @@ export async function loginAction(
   failedLogins.delete(email);
 
   await createSession(user.id);
-  redirect(user.role === "ADMIN" ? "/dashboard" : "/moj-czas");
+  redirect("/dashboard");
 }
 
 export async function logoutAction(): Promise<void> {

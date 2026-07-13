@@ -12,8 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/date-picker";
+import { MonthPicker } from "@/components/month-picker";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 function currentMonthKey(): string {
@@ -83,11 +84,10 @@ export function PeriodFilter() {
           >
             <ChevronLeft className="size-4" />
           </Button>
-          <Input
-            type="month"
-            className="h-8 w-40"
+          <MonthPicker
             value={monthKey}
-            onChange={(e) => e.target.value && update({ od: e.target.value })}
+            onChange={(value) => update({ od: value })}
+            className="h-8"
           />
           <Button
             variant="outline"
@@ -102,20 +102,18 @@ export function PeriodFilter() {
 
       {okres === "zakres" && (
         <div className="flex items-center gap-1.5">
-          <Input
-            type="date"
-            className="h-8 w-36"
+          <DatePicker
             value={od}
-            onChange={(e) => update({ od: e.target.value })}
-            aria-label="Data od"
+            onChange={(value) => update({ od: value })}
+            placeholder="Data od"
+            className="w-40 [&_button]:h-8"
           />
           <span className="text-sm text-muted-foreground">–</span>
-          <Input
-            type="date"
-            className="h-8 w-36"
+          <DatePicker
             value={doParam}
-            onChange={(e) => update({ do: e.target.value })}
-            aria-label="Data do"
+            onChange={(value) => update({ do: value })}
+            placeholder="Data do"
+            className="w-40 [&_button]:h-8"
           />
         </div>
       )}

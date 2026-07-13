@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/empty-state";
 import { RwImportDialog } from "./rw-import-dialog";
 import { RwBatchesSheet } from "./rw-batches-sheet";
 import { RwKpis } from "./rw-kpis";
+import { RwBoaCard } from "./rw-boa-card";
 import { RwCharts } from "./rw-charts";
 import { RwTable } from "./rw-table";
 import { RwManualMetrics } from "./rw-manual-metrics";
@@ -93,6 +94,7 @@ export function RwView({
       ) : (
         <>
           <RwKpis report={report} />
+          <RwBoaCard report={report} />
           <RwCharts report={report} />
           <RwTable report={report} />
           <RwManualMetrics report={report} />
