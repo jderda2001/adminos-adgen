@@ -146,11 +146,11 @@ async function main() {
   });
 
   const employeeDefs = [
-    { name: "Maciej Szczerba", email: "maciej.szczerba@adgen.pl", rateGr: 120_00, monthlyBudgetGr: 16_000_00 },
-    { name: "Greta Kamińska", email: "greta.kaminska@adgen.pl", rateGr: 95_00, monthlyBudgetGr: 12_000_00 },
-    { name: "Hania Wiśniewska", email: "hania.wisniewska@adgen.pl", rateGr: 85_00, monthlyBudgetGr: 10_000_00 },
-    { name: "Bartek Zieliński", email: "bartek.zielinski@adgen.pl", rateGr: 75_00, monthlyBudgetGr: 8_000_00 },
-    { name: "Ola Mazur", email: "ola.mazur@adgen.pl", rateGr: 60_00, monthlyBudgetGr: 6_000_00 },
+    { name: "Marek Wójcik", email: "marek.wojcik@example.com", rateGr: 120_00, monthlyBudgetGr: 16_000_00 },
+    { name: "Anna Nowak", email: "anna.nowak@example.com", rateGr: 95_00, monthlyBudgetGr: 12_000_00 },
+    { name: "Katarzyna Dąbrowska", email: "katarzyna.dabrowska@example.com", rateGr: 85_00, monthlyBudgetGr: 10_000_00 },
+    { name: "Piotr Jankowski", email: "piotr.jankowski@example.com", rateGr: 75_00, monthlyBudgetGr: 8_000_00 },
+    { name: "Tomasz Lewicki", email: "tomasz.lewicki@example.com", rateGr: 60_00, monthlyBudgetGr: 6_000_00 },
   ];
 
   const employees = new Map<string, string>(); // imię → userId
@@ -174,7 +174,7 @@ async function main() {
   // Podwyżka Hani: 95 zł/h od 1. dnia poprzedniego miesiąca (historia zmian stawek)
   await db.hourlyRate.create({
     data: {
-      userId: employees.get("Hania Wiśniewska")!,
+      userId: employees.get("Katarzyna Dąbrowska")!,
       ratePerHourGr: 95_00,
       validFrom: monthDay(1, 1),
     },
@@ -553,7 +553,7 @@ async function main() {
     // — wynagrodzenia: zarząd (isSalary → "Wypłaty | Zarząd")
     {
       key: "pensja-maciej",
-      supplierName: "Maciej Szczerba",
+      supplierName: "Marek Wójcik",
       docNumber: "Lista płac {MM/RRRR}",
       netGr: 15_500_00,
       vatRate: "ZW",
@@ -564,7 +564,7 @@ async function main() {
     // — wynagrodzenia: zespół (isSalary → "Wypłaty | Zespół")
     {
       key: "pensja-greta",
-      supplierName: "Greta Kamińska",
+      supplierName: "Anna Nowak",
       docNumber: "Lista płac {MM/RRRR}",
       netGr: 12_800_00,
       vatRate: "ZW",
@@ -574,7 +574,7 @@ async function main() {
     },
     {
       key: "pensja-hania",
-      supplierName: "Hania Wiśniewska",
+      supplierName: "Katarzyna Dąbrowska",
       docNumber: "Lista płac {MM/RRRR}",
       netGr: 12_600_00, // po podwyżce
       vatRate: "ZW",
@@ -584,7 +584,7 @@ async function main() {
     },
     {
       key: "pensja-bartek",
-      supplierName: "Bartek Zieliński",
+      supplierName: "Piotr Jankowski",
       docNumber: "Lista płac {MM/RRRR}",
       netGr: 10_200_00,
       vatRate: "ZW",
@@ -594,7 +594,7 @@ async function main() {
     },
     {
       key: "pensja-ola",
-      supplierName: "Ola Mazur",
+      supplierName: "Tomasz Lewicki",
       docNumber: "Lista płac {MM/RRRR}",
       netGr: 8_200_00,
       vatRate: "ZW",
@@ -719,12 +719,12 @@ async function main() {
   // — wynagrodzenia (VAT ZW, zapłacone do 10. dnia miesiąca).
   //   Zarząd → "Wypłaty | Zarząd", zespół → "Wypłaty | Zespół".
   const salaryByMonth = (offset: number) => [
-    { key: "pensja-maciej", name: "Maciej Szczerba", netGr: 15_500_00, category: CAT_BOARD },
-    { key: "pensja-greta", name: "Greta Kamińska", netGr: 12_800_00, category: CAT_TEAM },
+    { key: "pensja-maciej", name: "Marek Wójcik", netGr: 15_500_00, category: CAT_BOARD },
+    { key: "pensja-greta", name: "Anna Nowak", netGr: 12_800_00, category: CAT_TEAM },
     // pensja Hani spójna z podwyżką stawki od poprzedniego miesiąca
-    { key: "pensja-hania", name: "Hania Wiśniewska", netGr: offset >= 2 ? 11_000_00 : 12_600_00, category: CAT_TEAM },
-    { key: "pensja-bartek", name: "Bartek Zieliński", netGr: 10_200_00, category: CAT_TEAM },
-    { key: "pensja-ola", name: "Ola Mazur", netGr: 8_200_00, category: CAT_TEAM },
+    { key: "pensja-hania", name: "Katarzyna Dąbrowska", netGr: offset >= 2 ? 11_000_00 : 12_600_00, category: CAT_TEAM },
+    { key: "pensja-bartek", name: "Piotr Jankowski", netGr: 10_200_00, category: CAT_TEAM },
+    { key: "pensja-ola", name: "Tomasz Lewicki", netGr: 8_200_00, category: CAT_TEAM },
   ];
 
   // 2 i 1 miesiąc temu: pensje zapłacone. Bieżący miesiąc: niezapłacone —
@@ -1133,7 +1133,7 @@ async function main() {
   // wagi podziału czasu na klientów per pracownik
   const workProfiles: { userId: string; weights: [string, number][] }[] = [
     {
-      userId: employees.get("Maciej Szczerba")!,
+      userId: employees.get("Marek Wójcik")!,
       weights: [
         [techNova.id, 0.5],
         [meble.id, 0.3],
@@ -1141,28 +1141,28 @@ async function main() {
       ],
     },
     {
-      userId: employees.get("Greta Kamińska")!,
+      userId: employees.get("Anna Nowak")!,
       weights: [
         [bistro.id, 0.6],
         [techNova.id, 0.4],
       ],
     },
     {
-      userId: employees.get("Hania Wiśniewska")!,
+      userId: employees.get("Katarzyna Dąbrowska")!,
       weights: [
         [techNova.id, 0.7],
         [bistro.id, 0.3],
       ],
     },
     {
-      userId: employees.get("Bartek Zieliński")!,
+      userId: employees.get("Piotr Jankowski")!,
       weights: [
         [meble.id, 0.5],
         [fitLife.id, 0.5],
       ],
     },
     {
-      userId: employees.get("Ola Mazur")!,
+      userId: employees.get("Tomasz Lewicki")!,
       weights: [
         [techNova.id, 0.4],
         [bistro.id, 0.3],
