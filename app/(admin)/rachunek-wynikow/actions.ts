@@ -5,88 +5,119 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
-import { parseRwCsv } from "@/lib/rw-parse";
-import { RW_MANUAL_METRICS } from "@/lib/rw-types";
+import { RW_MANUAL_METRICS, findRwCategory, type RwKind } from "@/lib/rw-types";
 
 const RW_PATH = "/rachunek-wynikow";
-const MAX_CSV_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export interface RwImportSummary {
   ok: true;
   batchId: string;
   kind: string;
   imported: number;
-  warnings: number;
   months: number[];
 }
 export type RwImportResult = RwImportSummary | { ok: false; error: string };
 
+/** Wiersz przeglądu przekazywany z klienta do zatwierdzenia (kategoria już wybrana) */
+export interface RwReviewRow {
+  month: number; // 1–12
+  category: string; // kanoniczna kategoria (walidowana serwerowo)
+  amountGr: number;
+  description: string | null;
+  contractor: string | null;
+  bank: string | null;
+  note: string | null;
+}
+
 /**
- * Import CSV rachunku wyników (przychody lub koszty — format wykrywany
- * z nagłówka). Plik jest parsowany SERWEROWO (podgląd u klienta jest tylko
- * informacyjny). Import odrzucany w całości, jeśli jakikolwiek wiersz ma błąd —
- * częściowe importy utrudniałyby uzgadnianie z arkuszem.
+ * Zatwierdza zaimportowane operacje PO przeglądzie użytkownika. Parsowanie
+ * i auto-przypisanie kategorii dzieje się u klienta, ale KAŻDE pole jest
+ * tu walidowane serwerowo: miesiąc 1–12, kwota int, kategoria musi istnieć
+ * w taksonomii dla danego rodzaju. Zapis w transakcji jako jedna partia.
  */
-export async function importRwCsvAction(
-  formData: FormData
-): Promise<RwImportResult> {
+export async function commitRwReviewAction(input: {
+  year: number;
+  kind: string;
+  filename: string;
+  rows: RwReviewRow[];
+}): Promise<RwImportResult> {
   await requireAdmin();
 
-  const yearRaw = formData.get("year");
-  const year = typeof yearRaw === "string" ? parseInt(yearRaw, 10) : NaN;
+  const { year, kind, filename, rows } = input;
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {
     return { ok: false, error: "Nieprawidłowy rok importu" };
   }
+  if (kind !== "PRZYCHOD" && kind !== "KOSZT") {
+    return { ok: false, error: "Nieprawidłowy rodzaj danych" };
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { ok: false, error: "Brak operacji do zatwierdzenia" };
+  }
+  if (rows.length > 5000) {
+    return { ok: false, error: "Zbyt wiele operacji naraz (limit 5000)" };
+  }
 
-  const file = formData.get("file");
-  if (!(file instanceof File)) {
-    return { ok: false, error: "Nie przekazano pliku" };
-  }
-  if (file.size === 0) return { ok: false, error: "Plik jest pusty" };
-  if (file.size > MAX_CSV_BYTES) {
-    return { ok: false, error: "Plik jest za duży (limit 5 MB)" };
-  }
+  const clip = (v: unknown, max: number): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t.slice(0, max);
+  };
 
-  const text = await file.text();
-  const parsed = parseRwCsv(text);
-  if ("formatError" in parsed) return { ok: false, error: parsed.formatError };
-  if (parsed.errors.length > 0) {
-    const first = parsed.errors
-      .slice(0, 5)
-      .map((e) => `linia ${e.line}: ${e.message}`)
-      .join("; ");
-    return {
-      ok: false,
-      error: `Plik zawiera ${parsed.errors.length} błędnych wierszy — import odrzucony w całości. Pierwsze błędy: ${first}`,
-    };
-  }
-  if (parsed.entries.length === 0) {
-    return { ok: false, error: "Plik nie zawiera żadnych wierszy z danymi" };
+  const data: {
+    year: number;
+    month: number;
+    kind: string;
+    category: string;
+    amountGr: number;
+    description: string | null;
+    contractor: string | null;
+    bank: string | null;
+    note: string | null;
+    source: string;
+    batchId: string;
+  }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const nr = i + 1;
+    if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
+    }
+    if (!Number.isInteger(r.amountGr)) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota` };
+    }
+    if (!findRwCategory(kind as RwKind, r.category)) {
+      return {
+        ok: false,
+        error: `Operacja ${nr}: nieznana kategoria „${r.category}”`,
+      };
+    }
+    data.push({
+      year,
+      month: r.month,
+      kind,
+      category: r.category,
+      amountGr: r.amountGr,
+      description: clip(r.description, 300),
+      contractor: clip(r.contractor, 120),
+      bank: clip(r.bank, 40),
+      note: clip(r.note, 200),
+      source: "IMPORT",
+      batchId: "", // uzupełnione po utworzeniu partii
+    });
   }
 
   const batch = await db.$transaction(async (tx) => {
     const created = await tx.rwImportBatch.create({
       data: {
-        filename: file.name.slice(0, 200),
-        kind: parsed.kind,
+        filename: (filename || "import.csv").slice(0, 200),
+        kind,
         year,
-        rowCount: parsed.entries.length,
+        rowCount: data.length,
       },
     });
     await tx.rwEntry.createMany({
-      data: parsed.entries.map((e) => ({
-        year,
-        month: e.month,
-        kind: e.kind,
-        category: e.category,
-        amountGr: e.amountGr,
-        description: e.description,
-        contractor: e.contractor,
-        bank: e.bank,
-        note: e.note,
-        source: "IMPORT",
-        batchId: created.id,
-      })),
+      data: data.map((d) => ({ ...d, batchId: created.id })),
     });
     return created;
   });
@@ -95,10 +126,9 @@ export async function importRwCsvAction(
   return {
     ok: true,
     batchId: batch.id,
-    kind: parsed.kind,
-    imported: parsed.entries.length,
-    warnings: parsed.warnings.length,
-    months: [...new Set(parsed.entries.map((e) => e.month))].sort((a, b) => a - b),
+    kind,
+    imported: data.length,
+    months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
   };
 }
 

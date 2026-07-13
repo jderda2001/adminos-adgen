@@ -86,8 +86,18 @@ describe.skipIf(!filesPresent)("ZŁOTY TEST: realne CSV vs arkusz RW (6 miesięc
 
   if ("formatError" in revenueParsed || "formatError" in costParsed) return;
 
-  const entries: RwEntryLike[] = [...revenueParsed.entries, ...costParsed.entries];
+  const rawEntries = [...revenueParsed.entries, ...costParsed.entries];
+  const entries: RwEntryLike[] = rawEntries.map((e) => ({
+    month: e.month,
+    kind: e.kind,
+    category: e.category ?? "", // realny arkusz ma wszystkie kategorie wypełnione
+    amountGr: e.amountGr,
+  }));
   const report = buildRwReport(2026, entries, []);
+
+  it("realne pliki mają kategorie przy każdej operacji (nic do auto-uzupełnienia)", () => {
+    expect(rawEntries.filter((e) => e.category === null)).toEqual([]);
+  });
 
   it("brak nieznanych kategorii", () => {
     expect(report.unknownCategories).toEqual([]);

@@ -1,0 +1,5 @@
+[
+  { "match": "jan kowalski|anna nowak", "category": "Wypłaty zarządu", "confidence": "high" },
+  { "match": "piotr wisniewski", "category": "Delivery - wynagrodzenia", "confidence": "high" },
+  { "match": "biuro xyz", "category": "Delivery - podwykonawcy", "confidence": "medium" }
+]

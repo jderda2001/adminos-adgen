@@ -120,15 +120,16 @@ describe("parseRwCsv — przychody", () => {
     expect(res.entries[2]).toMatchObject({ month: 2, category: "Inne", amountGr: 50050 });
   });
 
-  it("nieznany typ przychodu → błąd z numerem linii", () => {
+  it("nieznany/pusty typ przychodu → NIE błąd, kategoria null do uzupełnienia", () => {
     const res = parseRwCsv(
-      "Miesiąc,Klient,Przychód netto,Typ Przychodu\n01 - styczeń,X,100,Nieistniejący typ"
+      "Miesiąc,Klient,Przychód netto,Typ Przychodu\n01 - styczeń,X,100,Nieistniejący typ\n02 - luty,Y,200,"
     );
     if ("formatError" in res) throw new Error(res.formatError);
-    expect(res.entries).toHaveLength(0);
-    expect(res.errors).toHaveLength(1);
-    expect(res.errors[0].line).toBe(2);
-    expect(res.errors[0].message).toContain("Nieznany typ przychodu");
+    expect(res.errors).toHaveLength(0);
+    expect(res.entries).toHaveLength(2);
+    expect(res.entries[0].category).toBeNull();
+    expect(res.entries[0].rawCategory).toBe("Nieistniejący typ");
+    expect(res.entries[1].category).toBeNull();
   });
 });
 

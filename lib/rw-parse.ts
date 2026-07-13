@@ -86,7 +86,10 @@ export function parseRwMonth(raw: string): number | null {
 export interface RwParsedEntry {
   month: number; // 1–12
   kind: RwKind;
-  category: string; // kanoniczna (zweryfikowana względem RW_CATEGORIES)
+  /** kanoniczna kategoria z pliku (zweryfikowana) LUB null gdy pusta/nieznana
+      — wtedy zostanie zaproponowana automatycznie i sprawdzona przy przeglądzie */
+  category: string | null;
+  rawCategory: string; // oryginalna wartość kolumny (do podglądu przy przeglądzie)
   amountGr: number; // przychody +, koszty −
   description: string | null;
   contractor: string | null;
@@ -180,21 +183,17 @@ export function parseRwCsv(text: string): RwParseResult | { formatError: string 
         errors.push({ line, message: `Nieprawidłowa kwota: „${kwotaRaw.trim()}”` });
         continue;
       }
+      // nieznany/pusty typ NIE jest błędem — kategoria zostanie zaproponowana
+      // automatycznie i sprawdzona przy przeglądzie przed zatwierdzeniem
       const category = findRwCategory("PRZYCHOD", typ);
-      if (!category) {
-        errors.push({
-          line,
-          message: `Nieznany typ przychodu: „${typ.trim()}” — dopuszczalne: Abonament marketingowy, Paczki leadów (stała współpraca), Paczki leadów (pilotaż), Inne`,
-        });
-        continue;
-      }
       if (amountGr < 0) {
         warnings.push({ line, message: "Ujemna kwota przychodu — zaimportowano ze znakiem z pliku" });
       }
       entries.push({
         month,
         kind,
-        category: category.name,
+        category: category?.name ?? null,
+        rawCategory: typ.trim(),
         amountGr,
         description: truncate(klient),
         contractor: null,
@@ -208,14 +207,9 @@ export function parseRwCsv(text: string): RwParseResult | { formatError: string 
         errors.push({ line, message: `Nieprawidłowa kwota: „${nettoRaw.trim()}”` });
         continue;
       }
+      // nieznana/pusta kategoria NIE jest błędem — zostanie zaproponowana
+      // automatycznie i sprawdzona przy przeglądzie przed zatwierdzeniem
       const category = findRwCategory("KOSZT", kategoria);
-      if (!category) {
-        errors.push({
-          line,
-          message: `Nieznana kategoria kosztu: „${kategoria.trim()}”`,
-        });
-        continue;
-      }
       if (amountGr > 0) {
         warnings.push({
           line,
@@ -225,7 +219,8 @@ export function parseRwCsv(text: string): RwParseResult | { formatError: string 
       entries.push({
         month,
         kind,
-        category: category.name,
+        category: category?.name ?? null,
+        rawCategory: kategoria.trim(),
         amountGr,
         description: truncate(opis),
         contractor: truncate(kontrahent, 120),

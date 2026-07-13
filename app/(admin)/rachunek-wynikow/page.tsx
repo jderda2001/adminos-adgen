@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { buildRwReport, type RwReport } from "@/lib/rw";
+import { loadPeopleRules } from "@/lib/rw-people";
 import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { RwView, type RwBatchRow } from "./rw-view";
@@ -73,7 +74,12 @@ export default async function RachunekWynikowPage({
         title="Rachunek wyników"
         description="Najważniejsze metryki firmy — przychody, koszty per grupa, marże i wynik, liczone automatycznie z importowanych CSV"
       />
-      <RwView report={report} years={years} batches={batchRows} />
+      <RwView
+        report={report}
+        years={years}
+        batches={batchRows}
+        peopleRules={loadPeopleRules()}
+      />
     </>
   );
 }
