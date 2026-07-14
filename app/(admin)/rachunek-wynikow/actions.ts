@@ -132,27 +132,23 @@ export async function commitRwReviewAction(input: {
   };
 }
 
-/** Wiersz przeglądu z importu wyciągu bankowego (NETTO + ślad brutto/VAT) */
+/** Wiersz przeglądu z importu wyciągu bankowego (kwota wprost z wyciągu) */
 export interface RwBankReviewRow {
   kind: string; // PRZYCHOD | KOSZT
   month: number; // 1–12
   category: string; // kanoniczna kategoria
-  amountGr: number; // NETTO ze znakiem (brutto/(1+VAT) lub ręczny podział)
-  grossAmountGr: number | null; // BRUTTO — ślad pochodzenia (null przy podziale)
-  vatRate: number | null; // stawka VAT — ślad pochodzenia (null przy podziale)
+  amountGr: number; // kwota ze znakiem (z wyciągu lub ręczny podział)
   description: string | null;
   note: string | null;
   dateISO: string | null;
 }
 
-const VAT_RATES = new Set([0, 8, 23]);
-
 /**
  * Zatwierdza operacje z wyciągu bankowego (mBank) PO przeglądzie. Jeden plik
- * ma OBA kierunki — kind jest per-wiersz. NETTO przychodzi z klienta (liczone
- * z brutto i VAT albo z ręcznego podziału operacji na kategorie); serwer
- * waliduje typ, znak (przychód +, koszt −) i kategorię. Brutto/VAT trafiają
- * do uwagi jako ślad pochodzenia. Zapis jako jedna partia (kind = „BANK").
+ * ma OBA kierunki — kind jest per-wiersz. Kwota przychodzi z klienta (wprost
+ * z wyciągu albo z ręcznego podziału operacji na kategorie); serwer waliduje
+ * typ, znak (przychód +, koszt −) i kategorię. Zapis jako jedna partia
+ * (kind = „BANK").
  */
 export async function commitRwBankReviewAction(input: {
   year: number;
@@ -214,24 +210,20 @@ export async function commitRwBankReviewAction(input: {
     if (!findRwCategory(r.kind as RwKind, r.category)) {
       return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
     }
-    const amountGr = r.amountGr;
-    // ślad pochodzenia w uwadze: brutto + VAT (albo „podział") + data operacji
-    const hasGross = Number.isInteger(r.grossAmountGr) && VAT_RATES.has(r.vatRate as number);
-    const vatNote =
-      (hasGross
-        ? `brutto ${((r.grossAmountGr as number) / 100).toFixed(2)} zł · VAT ${r.vatRate}%`
-        : "podział operacji") + (r.dateISO ? ` · ${r.dateISO}` : "");
-    const userNote = clip(r.note, 120);
+    // ślad pochodzenia w uwadze: data operacji z wyciągu
+    const userNote = clip(r.note, 160);
+    const dateNote = r.dateISO ? `wyciąg ${r.dateISO}` : null;
+    const note = [userNote, dateNote].filter(Boolean).join(" · ") || null;
     data.push({
       year,
       month: r.month,
       kind: r.kind,
       category: r.category,
-      amountGr,
+      amountGr: r.amountGr,
       description: clip(r.description, 300),
       contractor: null,
       bank: "mBank",
-      note: userNote ? `${userNote} · ${vatNote}` : vatNote,
+      note,
       source: "IMPORT_MBANK",
       batchId: "",
     });

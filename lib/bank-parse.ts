@@ -6,13 +6,11 @@
 //   2026-04-30;OPIS…;<nr konta>;<kat. mBank>;-1 234,56 PLN;
 //
 // Jeden plik zawiera OBA kierunki — przychody (kwota +) i koszty (kwota −).
-// Kwoty są BRUTTO; przeliczenie na netto (÷1,23 / ÷1,08) robimy osobno
-// (guessVatRate + netFromGrossGr), z możliwością korekty stawki w przeglądzie.
+// Kwoty bierzemy WPROST z wyciągu (nie operujemy już VAT-em); podział kwoty
+// na kategorie robi się w przeglądzie.
 
 import { parseCsv, parseRwAmountGr } from "./rw-parse";
 import type { RwKind } from "./rw-types";
-
-export type VatRate = 0 | 8 | 23;
 
 export interface BankRow {
   line: number; // 1-indeksowana linia pliku
@@ -21,7 +19,7 @@ export interface BankRow {
   description: string; // #Opis operacji (zawiera kontrahenta/merchant)
   account: string; // #Rachunek (kontrahent — nr konta)
   bankCategory: string; // #Kategoria (własna kat. mBanku — poglądowa)
-  grossAmountGr: number; // BRUTTO w groszach, ze znakiem
+  amountGr: number; // kwota w groszach, ze znakiem (wprost z wyciągu)
   kind: RwKind; // PRZYCHOD gdy +, KOSZT gdy −
 }
 
@@ -34,23 +32,13 @@ export interface BankParseResult {
 }
 export type BankParseOutcome = BankParseResult | { formatError: string };
 
-function norm(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/ł/g, "l")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
 /** nagłówek tabeli transakcji mBanku (bez „#", znormalizowany) */
 function headerCols(row: string[]): string[] {
   return row.map((c) => c.replace(/^#/, "").trim().toLowerCase());
 }
 
 /**
- * Parsuje wyciąg mBank. Zwraca wiersze z kwotą BRUTTO i wykrytym kierunkiem.
+ * Parsuje wyciąg mBank. Zwraca wiersze z kwotą i wykrytym kierunkiem.
  * Wiersze nietransakcyjne (podsumowania, złe daty) są pomijane z podaniem
  * powodu (nie blokują importu — bank dokleja wiersze zbiorcze).
  */
@@ -109,8 +97,8 @@ export function parseMbankCsv(text: string): BankParseOutcome {
     }
 
     const amtRaw = cell(cols, idxAmt);
-    const grossAmountGr = parseRwAmountGr(amtRaw);
-    if (grossAmountGr === null || grossAmountGr === 0) {
+    const amountGr = parseRwAmountGr(amtRaw);
+    if (amountGr === null || amountGr === 0) {
       skipped.push({ line, reason: `zła/zerowa kwota: „${amtRaw.trim()}”` });
       continue;
     }
@@ -122,36 +110,10 @@ export function parseMbankCsv(text: string): BankParseOutcome {
       description: clean(cell(cols, idxDesc)),
       account: clean(cell(cols, idxAcct)),
       bankCategory: cell(cols, idxCat).trim(),
-      grossAmountGr,
-      kind: grossAmountGr > 0 ? "PRZYCHOD" : "KOSZT",
+      amountGr,
+      kind: amountGr > 0 ? "PRZYCHOD" : "KOSZT",
     });
   }
 
   return { bank: "mBank", rows: out, skipped, skippedEmpty };
-}
-
-/**
- * Zgaduje stawkę VAT dla operacji (do przeliczenia brutto→netto). Sygnały
- * „bez VAT" (0%): wynagrodzenia, podatki (CIT/ZUS/US), opłaty bankowe,
- * przelewy na oszczędności, ubezpieczenia. Reszta → 23% (domyślnie).
- * 8% nie jest zgadywane automatycznie (rzadkie) — użytkownik ustawia ręcznie.
- * Użytkownik i tak może zmienić stawkę w przeglądzie.
- */
-export function guessVatRate(hint: {
-  description?: string | null;
-  bankCategory?: string | null;
-}): VatRate {
-  const s = norm(`${hint.description ?? ""} ${hint.bankCategory ?? ""}`);
-  if (/wynagrodz|pensj|wyplat|umowa|zlecen|honorarium|premi/.test(s)) return 0;
-  if (/\bcit\b|\bzus\b|\bpit\b|\bvat\b|urzad skarbow|\bus\b|podatek|zaliczk/.test(s)) return 0;
-  if (/oplata za prowadzenie|prowizj|odsetki|oplata bankow|oplaty bankow/.test(s)) return 0;
-  if (/oszczednosci|przelew wlasny|transfer wlasny|srodki wlasne/.test(s)) return 0;
-  if (/ubezpiecz/.test(s)) return 0;
-  return 23;
-}
-
-/** Brutto (grosze, ze znakiem) → netto (grosze). Netto = brutto / (1 + stawka). */
-export function netFromGrossGr(grossGr: number, rate: VatRate): number {
-  if (rate === 0) return grossGr;
-  return Math.round(grossGr / (1 + rate / 100));
 }
