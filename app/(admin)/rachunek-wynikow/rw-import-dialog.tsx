@@ -181,6 +181,9 @@ export function RwImportDialog({
   const [pending, startTransition] = useTransition();
   const [aiPending, startAiTransition] = useTransition();
   const parseToken = useRef(0);
+  // lustro rows do odczytu w callbackach async (świeży stan bez updatera)
+  const rowsRef = useRef<ReviewRow[]>(rows);
+  rowsRef.current = rows;
   const splitCounter = useRef(0);
   const splitOriginals = useRef<Map<number, ReviewRow>>(new Map());
 
@@ -476,30 +479,30 @@ export function RwImportDialog({
         return;
       }
       const byIndex = new Map(captured.map((c) => [c.index, c]));
+      // czysta kalkulacja na świeżym stanie (rowsRef), POZA updaterem —
+      // updater setState wykonuje się po tym kodzie (i w StrictMode 2×),
+      // więc liczenie `applied` w środku dawało fałszywy toast „brak propozycji"
+      const next = [...rowsRef.current];
+      const matches = (row: ReviewRow, c: (typeof captured)[number]) =>
+        row.splitId === null &&
+        row.kind === c.kind &&
+        row.month === c.month &&
+        row.amountGr === c.amountGr &&
+        row.description === c.description;
+      const stillUncertain = (row: ReviewRow) =>
+        row.category === "" || (row.source === "auto" && row.confidence !== "high");
       let applied = 0;
-      setRows((prev) => {
-        const next = [...prev];
-        const matches = (row: ReviewRow, c: (typeof captured)[number]) =>
-          row.splitId === null &&
-          row.kind === c.kind &&
-          row.month === c.month &&
-          row.amountGr === c.amountGr &&
-          row.description === c.description;
-        const stillUncertain = (row: ReviewRow) =>
-          row.category === "" || (row.source === "auto" && row.confidence !== "high");
-        for (const s of res.suggestions) {
-          const c = byIndex.get(s.index);
-          if (!c) continue;
-          // preferuj pierwotny indeks; gdy przesunięty — znajdź po deskryptorze
-          let at =
-            next[s.index] && matches(next[s.index], c) ? s.index : -1;
-          if (at === -1) at = next.findIndex((row) => matches(row, c) && stillUncertain(row));
-          if (at === -1 || !stillUncertain(next[at])) continue;
-          next[at] = { ...next[at], category: s.category, source: "auto", confidence: s.confidence };
-          applied++;
-        }
-        return next;
-      });
+      for (const s of res.suggestions) {
+        const c = byIndex.get(s.index);
+        if (!c) continue;
+        // preferuj pierwotny indeks; gdy przesunięty — znajdź po deskryptorze
+        let at = next[s.index] && matches(next[s.index], c) ? s.index : -1;
+        if (at === -1) at = next.findIndex((row) => matches(row, c) && stillUncertain(row));
+        if (at === -1 || !stillUncertain(next[at])) continue;
+        next[at] = { ...next[at], category: s.category, source: "auto", confidence: s.confidence };
+        applied++;
+      }
+      setRows(next);
       if (applied > 0) {
         toast.success(`AI zaproponowało kategorie dla ${applied} operacji`);
       } else {
