@@ -74,13 +74,16 @@ export function AppSidebar({
 
   return (
     <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r bg-sidebar">
-      <div className="flex h-16 items-center gap-2.5 px-5">
-        <div className="grid size-8 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-          a
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold">adGen</div>
-          <div className="text-[11px] text-muted-foreground">Finanse</div>
+      <div className="flex h-16 items-center px-5">
+        <div>
+          {/* logo adGen — ciemne na jasnym tle, jasne (białe) na ciemnym */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/4.png" alt="adGen" className="h-[22px] w-auto dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/3.png" alt="adGen" className="hidden h-[22px] w-auto dark:block" />
+          <div className="mt-1 text-[11px] leading-none text-muted-foreground">
+            Finanse
+          </div>
         </div>
       </div>
 

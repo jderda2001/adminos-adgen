@@ -23,7 +23,12 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">adGen Finanse</CardTitle>
+          {/* logo adGen — ciemne na jasnym tle, jasne (białe) na ciemnym */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/4.png" alt="adGen" className="h-7 w-auto dark:hidden" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/3.png" alt="adGen" className="hidden h-7 w-auto dark:block" />
+          <CardTitle className="mt-2 text-lg">Finanse</CardTitle>
           <CardDescription>
             Zaloguj się, aby korzystać z systemu
           </CardDescription>
