@@ -164,7 +164,7 @@ export function RwBatchEditDialog({
   return (
     <Dialog open={open} onOpenChange={(o) => (pending ? null : onOpenChange(o))}>
       <DialogContent
-        className="flex max-h-[90vh] flex-col sm:max-w-3xl"
+        className="flex max-h-[90vh] flex-col sm:max-w-5xl"
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
@@ -209,10 +209,10 @@ export function RwBatchEditDialog({
                         {RW_MONTH_SHORT[r.month - 1]}
                       </td>
                       <td className="px-2 py-1.5">
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-start gap-1.5">
                           <span
                             className={cn(
-                              "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
+                              "mt-0.5 shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
                               r.kind === "PRZYCHOD"
                                 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
                                 : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
@@ -220,7 +220,10 @@ export function RwBatchEditDialog({
                           >
                             {r.kind === "PRZYCHOD" ? "P" : "K"}
                           </span>
-                          <span className="max-w-[240px] truncate font-medium">
+                          <span
+                            className="font-medium break-words"
+                            title={r.description || r.contractor || undefined}
+                          >
                             {r.description || r.contractor || "—"}
                           </span>
                         </div>

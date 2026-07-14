@@ -662,7 +662,7 @@ export function RwImportDialog({
       <DialogContent
         className={cn(
           "flex max-h-[90vh] flex-col",
-          step === "review" ? "sm:max-w-3xl" : "sm:max-w-lg"
+          step === "review" ? "sm:max-w-5xl" : "sm:max-w-lg"
         )}
         // klik poza treścią (tło, dropdown kategorii w portalu) NIE zamyka —
         // zamykamy tylko przez X / Anuluj, żeby nie gubić pracy w przeglądzie
@@ -895,11 +895,11 @@ export function RwImportDialog({
                           {r.splitRole === "b" ? "" : RW_MONTH_SHORT[r.month - 1]}
                         </td>
                         <td className="px-2 py-1.5">
-                          <div className={cn("flex items-center gap-1.5", isSplit && "pl-3")}>
+                          <div className={cn("flex items-start gap-1.5", isSplit && "pl-3")}>
                             {isBank && !isSplit && (
                               <span
                                 className={cn(
-                                  "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
+                                  "mt-0.5 shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
                                   r.kind === "PRZYCHOD"
                                     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
                                     : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
@@ -911,18 +911,21 @@ export function RwImportDialog({
                             {r.internal && !isSplit && (
                               <span
                                 title="przelew własny (między kontami adGen)"
-                                className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
+                                className="mt-0.5 shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
                               >
                                 własny
                               </span>
                             )}
-                            {isSplit && <span className="shrink-0 text-muted-foreground">↳</span>}
+                            {isSplit && <span className="mt-0.5 shrink-0 text-muted-foreground">↳</span>}
                             <span className="min-w-0 flex-1">
-                              <span className="block max-w-[240px] truncate font-medium">
+                              <span
+                                className="block font-medium break-words"
+                                title={r.description || r.contractor || undefined}
+                              >
                                 {r.description || r.contractor || "—"}
                               </span>
                               {r.sourceFile && (
-                                <span className="block max-w-[240px] truncate text-[10px] text-muted-foreground">
+                                <span className="block truncate text-[10px] text-muted-foreground" title={r.sourceFile}>
                                   {r.sourceFile}
                                 </span>
                               )}
@@ -932,7 +935,7 @@ export function RwImportDialog({
                                 type="button"
                                 onClick={() => splitRow(i)}
                                 title="Podziel operację na dwie kategorie"
-                                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="ml-1 mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                               >
                                 <Split className="size-3.5" />
                               </button>
@@ -942,7 +945,7 @@ export function RwImportDialog({
                                 type="button"
                                 onClick={() => mergeSplit(r.splitId as number)}
                                 title="Scal podział z powrotem w jedną operację"
-                                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                className="ml-1 mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
                               >
                                 <Undo2 className="size-3.5" />
                               </button>
