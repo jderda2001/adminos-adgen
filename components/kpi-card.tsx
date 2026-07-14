@@ -41,7 +41,7 @@ export function KpiCard({
       </div>
       <div
         className={cn(
-          "mt-2 text-2xl font-semibold tabular-nums tracking-tight",
+          "mt-2 truncate text-xl font-semibold tabular-nums tracking-tight",
           VALUE_TONE[tone]
         )}
       >
@@ -54,13 +54,13 @@ export function KpiCard({
   );
 
   const base =
-    "block rounded-xl border bg-card p-4 shadow-[var(--shadow-card)] transition-colors";
+    "block rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-card)] transition-colors";
 
   if (href) {
     return (
       <Link
         href={href}
-        className={cn(base, "hover:border-primary/40 hover:bg-accent/40", className)}
+        className={cn(base, "hover:border-primary/30 hover:bg-accent/40", className)}
       >
         {inner}
       </Link>
