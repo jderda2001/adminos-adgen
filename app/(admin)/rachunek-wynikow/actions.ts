@@ -6,7 +6,6 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { RW_MANUAL_METRICS, findRwCategory, type RwKind } from "@/lib/rw-types";
-import { netFromGrossGr, type VatRate } from "@/lib/bank-parse";
 
 const RW_PATH = "/rachunek-wynikow";
 
@@ -133,13 +132,14 @@ export async function commitRwReviewAction(input: {
   };
 }
 
-/** Wiersz przeglądu z importu wyciągu bankowego (kwota BRUTTO + stawka VAT) */
+/** Wiersz przeglądu z importu wyciągu bankowego (NETTO + ślad brutto/VAT) */
 export interface RwBankReviewRow {
-  kind: string; // PRZYCHOD | KOSZT (z znaku kwoty, edytowalny)
+  kind: string; // PRZYCHOD | KOSZT
   month: number; // 1–12
   category: string; // kanoniczna kategoria
-  grossAmountGr: number; // BRUTTO ze znakiem (z wyciągu)
-  vatRate: number; // 0 | 8 | 23
+  amountGr: number; // NETTO ze znakiem (brutto/(1+VAT) lub ręczny podział)
+  grossAmountGr: number | null; // BRUTTO — ślad pochodzenia (null przy podziale)
+  vatRate: number | null; // stawka VAT — ślad pochodzenia (null przy podziale)
   description: string | null;
   note: string | null;
   dateISO: string | null;
@@ -149,9 +149,10 @@ const VAT_RATES = new Set([0, 8, 23]);
 
 /**
  * Zatwierdza operacje z wyciągu bankowego (mBank) PO przeglądzie. Jeden plik
- * ma OBA kierunki — kind jest per-wiersz. Kwota NETTO liczona jest tutaj
- * serwerowo z brutto i stawki VAT (autorytatywnie, nie z klienta): znak netto
- * musi zgadzać się z kierunkiem. Zapis jako jedna partia (kind = „BANK").
+ * ma OBA kierunki — kind jest per-wiersz. NETTO przychodzi z klienta (liczone
+ * z brutto i VAT albo z ręcznego podziału operacji na kategorie); serwer
+ * waliduje typ, znak (przychód +, koszt −) i kategorię. Brutto/VAT trafiają
+ * do uwagi jako ślad pochodzenia. Zapis jako jedna partia (kind = „BANK").
  */
 export async function commitRwBankReviewAction(input: {
   year: number;
@@ -200,28 +201,26 @@ export async function commitRwBankReviewAction(input: {
     if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
       return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
     }
-    if (!Number.isInteger(r.grossAmountGr) || r.grossAmountGr === 0) {
-      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota brutto` };
+    if (!Number.isInteger(r.amountGr) || r.amountGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota netto` };
     }
-    if (!VAT_RATES.has(r.vatRate)) {
-      return { ok: false, error: `Operacja ${nr}: nieprawidłowa stawka VAT` };
+    // znak netto musi odpowiadać kierunkowi (przychód +, koszt −)
+    if (r.kind === "PRZYCHOD" && r.amountGr <= 0) {
+      return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
+    }
+    if (r.kind === "KOSZT" && r.amountGr >= 0) {
+      return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
     }
     if (!findRwCategory(r.kind as RwKind, r.category)) {
       return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
     }
-    // NETTO liczone serwerowo (autorytatywnie) z brutto + VAT
-    const amountGr = netFromGrossGr(r.grossAmountGr, r.vatRate as VatRate);
-    // znak netto musi odpowiadać kierunkowi (przychód +, koszt −)
-    if (r.kind === "PRZYCHOD" && amountGr <= 0) {
-      return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
-    }
-    if (r.kind === "KOSZT" && amountGr >= 0) {
-      return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
-    }
-    // ślad pochodzenia w uwadze: brutto + stawka VAT + data operacji
+    const amountGr = r.amountGr;
+    // ślad pochodzenia w uwadze: brutto + VAT (albo „podział") + data operacji
+    const hasGross = Number.isInteger(r.grossAmountGr) && VAT_RATES.has(r.vatRate as number);
     const vatNote =
-      `brutto ${(r.grossAmountGr / 100).toFixed(2)} zł · VAT ${r.vatRate}%` +
-      (r.dateISO ? ` · ${r.dateISO}` : "");
+      (hasGross
+        ? `brutto ${((r.grossAmountGr as number) / 100).toFixed(2)} zł · VAT ${r.vatRate}%`
+        : "podział operacji") + (r.dateISO ? ` · ${r.dateISO}` : "");
     const userNote = clip(r.note, 120);
     data.push({
       year,

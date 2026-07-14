@@ -15,7 +15,7 @@
 
 import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
-import { Upload, ArrowLeft, Wand2, AlertTriangle } from "lucide-react";
+import { Upload, ArrowLeft, Wand2, AlertTriangle, Split, Undo2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -104,6 +104,9 @@ interface ReviewRow {
   category: string; // "" = do wyboru
   source: "csv" | "auto";
   confidence: "high" | "medium" | "low";
+  // podział jednej operacji na kategorie (np. Meta: część delivery, część marketing)
+  splitId: number | null; // wspólny id części podziału (null = zwykły wiersz)
+  splitRole: "a" | "b" | null; // „a" ma edytowalne netto, „b" dostaje resztę
 }
 
 function IssueList({ issues }: { issues: RwParseIssue[] }) {
@@ -142,6 +145,9 @@ export function RwImportDialog({
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, startTransition] = useTransition();
   const parseToken = useRef(0);
+  const splitCounter = useRef(0);
+  // snapshot pierwotnego wiersza przed podziałem — do „scal z powrotem"
+  const splitOriginals = useRef<Map<number, ReviewRow>>(new Map());
 
   const groupsByKind = useMemo(
     () => ({ PRZYCHOD: categoryGroups("PRZYCHOD"), KOSZT: categoryGroups("KOSZT") }),
@@ -259,6 +265,8 @@ export function RwImportDialog({
           category: s.category ?? "",
           source: "auto",
           confidence: s.confidence,
+          splitId: null,
+          splitRole: null,
         };
       });
       setRows(built);
@@ -280,6 +288,8 @@ export function RwImportDialog({
             category: e.category,
             source: "csv",
             confidence: "high",
+            splitId: null,
+            splitRole: null,
           };
         }
         const s = suggestCategory(sheet.kind, {
@@ -300,6 +310,8 @@ export function RwImportDialog({
           category: s.category ?? "",
           source: "auto",
           confidence: s.confidence,
+          splitId: null,
+          splitRole: null,
         };
       });
       setRows(built);
@@ -324,6 +336,60 @@ export function RwImportDialog({
     );
   }
 
+  // Podział operacji na 2 części (np. płatność Meta: część delivery, część
+  // marketing). Część „a" ma edytowalne netto, część „b" dostaje resztę, więc
+  // sumują się dokładnie do kwoty pierwotnej. Netto trafia do bazy wprost.
+  function splitRow(index: number) {
+    setRows((prev) => {
+      const r = prev[index];
+      if (!r || r.splitId !== null || Math.abs(r.amountGr) < 2) return prev;
+      const id = ++splitCounter.current;
+      splitOriginals.current.set(id, r);
+      const half = Math.round(r.amountGr / 2);
+      const base = { ...r, grossAmountGr: null, splitId: id, source: "csv" as const, confidence: "high" as const };
+      const partA: ReviewRow = { ...base, amountGr: half, splitRole: "a" };
+      const partB: ReviewRow = { ...base, amountGr: r.amountGr - half, splitRole: "b" };
+      return [...prev.slice(0, index), partA, partB, ...prev.slice(index + 1)];
+    });
+  }
+
+  function mergeSplit(splitId: number) {
+    const orig = splitOriginals.current.get(splitId);
+    setRows((prev) => {
+      const out: ReviewRow[] = [];
+      let done = false;
+      for (const r of prev) {
+        if (r.splitId === splitId) {
+          if (!done) {
+            out.push(orig ?? { ...r, splitId: null, splitRole: null });
+            done = true;
+          }
+        } else out.push(r);
+      }
+      return out;
+    });
+    splitOriginals.current.delete(splitId);
+  }
+
+  // ustawia netto części „a" (w groszach, wartość bezwzględna); „b" = reszta
+  function setSplitNet(splitId: number, absGr: number) {
+    const orig = splitOriginals.current.get(splitId);
+    if (!orig) return;
+    const total = orig.amountGr; // ze znakiem
+    const sign = total < 0 ? -1 : 1;
+    // obie części niezerowe: magnituda w [1 gr, |total|−1 gr]
+    const mag = Math.min(Math.abs(total) - 1, Math.max(1, Math.round(Math.abs(absGr))));
+    const a = sign * mag;
+    const b = total - a;
+    setRows((prev) =>
+      prev.map((r) =>
+        r.splitId === splitId
+          ? { ...r, amountGr: r.splitRole === "a" ? a : b }
+          : r
+      )
+    );
+  }
+
   function handleCommit() {
     if (stats.missing > 0) {
       toast.error("Uzupełnij kategorie dla wszystkich operacji");
@@ -339,8 +405,9 @@ export function RwImportDialog({
                 kind: r.kind,
                 month: r.month,
                 category: r.category,
-                grossAmountGr: r.grossAmountGr as number,
-                vatRate: r.vatRate,
+                amountGr: r.amountGr,
+                grossAmountGr: r.grossAmountGr,
+                vatRate: r.grossAmountGr === null ? null : r.vatRate,
                 description: r.description,
                 note: r.note,
                 dateISO: r.dateISO,
@@ -408,7 +475,9 @@ export function RwImportDialog({
               <>
                 Kwoty z wyciągu są <span className="font-medium text-foreground">brutto</span> —
                 netto liczone jest z VAT (÷1,23 / ÷1,08). Sprawdź kierunek,
-                kategorię i stawkę VAT; popraw w razie potrzeby.
+                kategorię i stawkę VAT; jedną operację można{" "}
+                <span className="font-medium text-foreground">podzielić</span> na dwie
+                kategorie (np. Meta: część delivery, część marketing).
               </>
             ) : (
               <>
@@ -523,20 +592,22 @@ export function RwImportDialog({
                     const needsCheck =
                       r.category === "" ||
                       (r.source === "auto" && r.confidence !== "high");
+                    const isSplit = r.splitId !== null;
                     return (
                       <tr
-                        key={i}
+                        key={isSplit ? `s${r.splitId}-${r.splitRole}` : `r${i}`}
                         className={cn(
                           "border-t align-top",
-                          needsCheck && "bg-amber-50/60 dark:bg-amber-950/20"
+                          needsCheck && "bg-amber-50/60 dark:bg-amber-950/20",
+                          isSplit && "bg-blue-50/40 dark:bg-blue-950/10"
                         )}
                       >
                         <td className="px-2 py-1.5 text-xs text-muted-foreground tabular-nums">
-                          {RW_MONTH_SHORT[r.month - 1]}
+                          {r.splitRole === "b" ? "" : RW_MONTH_SHORT[r.month - 1]}
                         </td>
                         <td className="px-2 py-1.5">
-                          <div className="flex items-center gap-1.5">
-                            {isBank && (
+                          <div className={cn("flex items-center gap-1.5", isSplit && "pl-3")}>
+                            {isBank && !isSplit && (
                               <span
                                 className={cn(
                                   "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
@@ -548,32 +619,57 @@ export function RwImportDialog({
                                 {r.kind === "PRZYCHOD" ? "P" : "K"}
                               </span>
                             )}
-                            <span className="max-w-[260px] truncate font-medium">
+                            {isSplit && <span className="shrink-0 text-muted-foreground">↳</span>}
+                            <span className="max-w-[220px] truncate font-medium">
                               {r.description || r.contractor || "—"}
                             </span>
+                            {isBank && !isSplit && (
+                              <button
+                                type="button"
+                                onClick={() => splitRow(i)}
+                                title="Podziel operację na dwie kategorie"
+                                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                <Split className="size-3.5" />
+                              </button>
+                            )}
+                            {isSplit && r.splitRole === "a" && (
+                              <button
+                                type="button"
+                                onClick={() => mergeSplit(r.splitId as number)}
+                                title="Scal podział z powrotem w jedną operację"
+                                className="ml-1 shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                <Undo2 className="size-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                         {isBank ? (
                           <>
                             <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
-                              {formatZl(r.grossAmountGr ?? 0)}
+                              {isSplit ? "—" : formatZl(r.grossAmountGr ?? 0)}
                             </td>
                             <td className="px-2 py-1.5">
-                              <Select
-                                value={String(r.vatRate)}
-                                onValueChange={(v) => setRowVat(i, Number(v) as VatRate)}
-                              >
-                                <SelectTrigger size="sm" className="w-16">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {VAT_RATES.map((v) => (
-                                    <SelectItem key={v} value={String(v)}>
-                                      {v}%
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                              {isSplit ? (
+                                <span className="text-xs text-muted-foreground">podział</span>
+                              ) : (
+                                <Select
+                                  value={String(r.vatRate)}
+                                  onValueChange={(v) => setRowVat(i, Number(v) as VatRate)}
+                                >
+                                  <SelectTrigger size="sm" className="w-16">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {VAT_RATES.map((v) => (
+                                      <SelectItem key={v} value={String(v)}>
+                                        {v}%
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                             </td>
                             <td
                               className={cn(
@@ -581,7 +677,24 @@ export function RwImportDialog({
                                 r.amountGr < 0 && "text-red-600 dark:text-red-400"
                               )}
                             >
-                              {formatZl(r.amountGr)}
+                              {isSplit && r.splitRole === "a" ? (
+                                <input
+                                  key={`net-${r.splitId}`}
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  defaultValue={(Math.abs(r.amountGr) / 100).toFixed(2)}
+                                  onChange={(e) =>
+                                    setSplitNet(
+                                      r.splitId as number,
+                                      Math.round(parseFloat(e.target.value || "0") * 100)
+                                    )
+                                  }
+                                  className="w-20 rounded-md border border-input bg-background px-1.5 py-0.5 text-right tabular-nums focus:border-ring focus:outline-none"
+                                />
+                              ) : (
+                                formatZl(r.amountGr)
+                              )}
                             </td>
                           </>
                         ) : (
