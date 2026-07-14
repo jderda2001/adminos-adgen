@@ -109,6 +109,7 @@ export default async function RachunekWynikowPage({
         peopleRules={loadPeopleRules()}
         internalRules={loadInternalRulesConfig()}
         knownAccounts={knownAccounts}
+        aiEnabled={Boolean(process.env.ANTHROPIC_API_KEY)}
       />
     </>
   );

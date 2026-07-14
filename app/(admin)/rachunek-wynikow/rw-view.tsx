@@ -40,6 +40,7 @@ export function RwView({
   peopleRules,
   internalRules,
   knownAccounts,
+  aiEnabled,
 }: {
   report: RwReport;
   years: number[];
@@ -47,6 +48,7 @@ export function RwView({
   peopleRules: PersonRule[];
   internalRules: InternalRulesConfig;
   knownAccounts: BankAccount[];
+  aiEnabled: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -81,6 +83,7 @@ export function RwView({
             peopleRules={peopleRules}
             internalRules={internalRules}
             knownAccounts={knownAccounts}
+            aiEnabled={aiEnabled}
           />
         </div>
       </div>
@@ -103,6 +106,7 @@ export function RwView({
               peopleRules={peopleRules}
               internalRules={internalRules}
               knownAccounts={knownAccounts}
+              aiEnabled={aiEnabled}
               trigger={<Button size="sm">Importuj CSV</Button>}
             />
           </EmptyState>

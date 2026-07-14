@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { RW_MANUAL_METRICS, findRwCategory, type RwKind } from "@/lib/rw-types";
+import { aiCategorize, isAiEnabled, type AiRowInput } from "@/lib/rw-ai";
 
 const RW_PATH = "/rachunek-wynikow";
 
@@ -265,6 +267,82 @@ export async function commitRwBankReviewAction(input: {
     imported: data.length,
     months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
   };
+}
+
+/** Wiersz wysyłany do AI-doprecyzowania kategorii (klient → akcja) */
+export interface RwAiRequestRow {
+  index: number; // pozycja wiersza w przeglądzie (identyfikator odpowiedzi)
+  kind: string; // PRZYCHOD | KOSZT
+  description: string | null;
+  amountGr: number;
+}
+
+export type RwAiResult =
+  | {
+      ok: true;
+      suggestions: {
+        index: number;
+        category: string;
+        confidence: "high" | "medium" | "low";
+      }[];
+    }
+  | { ok: false; error: string };
+
+/**
+ * Pass AI: kategoryzuje przez Claude operacje, których silnik reguł nie
+ * rozpoznał pewnie. Wymaga ANTHROPIC_API_KEY na serwerze (klucz nigdy nie
+ * trafia do klienta). Zwrócone kategorie są zwalidowane względem taksonomii
+ * (lib/rw-ai.ts) — i tak lądują w edytowalnych dropdownach przeglądu.
+ */
+export async function aiCategorizeAction(rows: RwAiRequestRow[]): Promise<RwAiResult> {
+  await requireAdmin();
+  if (!isAiEnabled()) {
+    return { ok: false, error: "AI nie jest skonfigurowane (brak ANTHROPIC_API_KEY na serwerze)" };
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { ok: false, error: "Brak operacji do analizy" };
+  }
+  if (rows.length > 400) {
+    return { ok: false, error: "Zbyt wiele operacji naraz (limit 400)" };
+  }
+
+  const inputs: AiRowInput[] = [];
+  for (const r of rows) {
+    if (
+      !Number.isInteger(r.index) ||
+      r.index < 0 ||
+      (r.kind !== "PRZYCHOD" && r.kind !== "KOSZT") ||
+      !Number.isInteger(r.amountGr)
+    ) {
+      return { ok: false, error: "Nieprawidłowe dane operacji" };
+    }
+    inputs.push({
+      index: r.index,
+      kind: r.kind,
+      description: typeof r.description === "string" ? r.description : "",
+      amountGr: r.amountGr,
+    });
+  }
+
+  try {
+    const suggestions = await aiCategorize(inputs);
+    return { ok: true, suggestions };
+  } catch (e) {
+    // typowane wyjątki SDK — od najbardziej szczegółowych
+    if (e instanceof Anthropic.AuthenticationError) {
+      return { ok: false, error: "Nieprawidłowy klucz API (ANTHROPIC_API_KEY)" };
+    }
+    if (e instanceof Anthropic.RateLimitError) {
+      return { ok: false, error: "Limit zapytań API — spróbuj za chwilę" };
+    }
+    if (e instanceof Anthropic.APIConnectionError) {
+      return { ok: false, error: "Brak połączenia z API Anthropic" };
+    }
+    if (e instanceof Anthropic.APIError) {
+      return { ok: false, error: `Błąd API Anthropic (${e.status ?? "?"})` };
+    }
+    return { ok: false, error: "Nieoczekiwany błąd analizy AI" };
+  }
 }
 
 /** Cofa import — usuwa partię wraz ze wszystkimi jej wpisami */

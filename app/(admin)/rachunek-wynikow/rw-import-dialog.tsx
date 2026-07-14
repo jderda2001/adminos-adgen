@@ -24,6 +24,7 @@ import {
   Split,
   Undo2,
   ArrowLeftRight,
+  Sparkles,
 } from "lucide-react";
 import {
   Dialog,
@@ -69,6 +70,7 @@ import { formatZl } from "./rw-format";
 import {
   commitRwReviewAction,
   commitRwBankReviewAction,
+  aiCategorizeAction,
   type RwReviewRow,
   type RwBankReviewRow,
 } from "./actions";
@@ -157,12 +159,15 @@ export function RwImportDialog({
   peopleRules = [],
   internalRules = { selfNames: DEFAULT_SELF_NAMES, accounts: [] },
   knownAccounts = [],
+  aiEnabled = false,
 }: {
   year: number;
   trigger?: ReactNode;
   peopleRules?: PersonRule[];
   internalRules?: InternalRulesConfig;
   knownAccounts?: BankAccount[];
+  /** ANTHROPIC_API_KEY obecny na serwerze → przycisk „Doprecyzuj z AI" */
+  aiEnabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"select" | "review">("select");
@@ -174,6 +179,7 @@ export function RwImportDialog({
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, startTransition] = useTransition();
+  const [aiPending, startAiTransition] = useTransition();
   const parseToken = useRef(0);
   const splitCounter = useRef(0);
   const splitOriginals = useRef<Map<number, ReviewRow>>(new Map());
@@ -226,6 +232,19 @@ export function RwImportDialog({
   const skippedSumGr = useMemo(
     () => skipped.reduce((s, x) => s + x.row.amountGr, 0),
     [skipped]
+  );
+
+  // operacje do AI-doprecyzowania: bez kategorii albo auto z niepewnością
+  const aiTargets = useMemo(
+    () =>
+      rows
+        .map((r, i) => ({ r, i }))
+        .filter(
+          ({ r }) =>
+            r.splitId === null &&
+            (r.category === "" || (r.source === "auto" && r.confidence !== "high"))
+        ),
+    [rows]
   );
 
   const monthSums = useMemo(() => {
@@ -426,6 +445,67 @@ export function RwImportDialog({
         i === index ? { ...r, category, source: "csv", confidence: "high" } : r
       )
     );
+  }
+
+  /**
+   * Pass AI: wysyła niepewne operacje do Claude (akcja serwerowa), propozycje
+   * ląduja w dropdownach. Wiersze identyfikujemy indeksem ORAZ deskryptorem
+   * (kind/kwota/opis/miesiąc) — indeksy mogą się przesunąć, gdy użytkownik
+   * w trakcie analizy przywróci pominięty przelew własny.
+   */
+  function runAi() {
+    const captured = aiTargets.map(({ r, i }) => ({
+      index: i,
+      kind: r.kind,
+      month: r.month,
+      description: r.description,
+      amountGr: r.amountGr,
+    }));
+    if (captured.length === 0) return;
+    startAiTransition(async () => {
+      const res = await aiCategorizeAction(
+        captured.map((c) => ({
+          index: c.index,
+          kind: c.kind,
+          description: c.description,
+          amountGr: c.amountGr,
+        }))
+      );
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      const byIndex = new Map(captured.map((c) => [c.index, c]));
+      let applied = 0;
+      setRows((prev) => {
+        const next = [...prev];
+        const matches = (row: ReviewRow, c: (typeof captured)[number]) =>
+          row.splitId === null &&
+          row.kind === c.kind &&
+          row.month === c.month &&
+          row.amountGr === c.amountGr &&
+          row.description === c.description;
+        const stillUncertain = (row: ReviewRow) =>
+          row.category === "" || (row.source === "auto" && row.confidence !== "high");
+        for (const s of res.suggestions) {
+          const c = byIndex.get(s.index);
+          if (!c) continue;
+          // preferuj pierwotny indeks; gdy przesunięty — znajdź po deskryptorze
+          let at =
+            next[s.index] && matches(next[s.index], c) ? s.index : -1;
+          if (at === -1) at = next.findIndex((row) => matches(row, c) && stillUncertain(row));
+          if (at === -1 || !stillUncertain(next[at])) continue;
+          next[at] = { ...next[at], category: s.category, source: "auto", confidence: s.confidence };
+          applied++;
+        }
+        return next;
+      });
+      if (applied > 0) {
+        toast.success(`AI zaproponowało kategorie dla ${applied} operacji`);
+      } else {
+        toast.info("AI nie miało nowych propozycji");
+      }
+    });
   }
 
   /** przywraca pominięty przelew własny do listy (kategoria do wyboru) */
@@ -718,6 +798,17 @@ export function RwImportDialog({
                     ({showSkipped ? "ukryj" : "pokaż"})
                   </span>
                 </button>
+              )}
+              {aiEnabled && aiTargets.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={runAi}
+                  disabled={aiPending || pending}
+                >
+                  <Sparkles data-icon="inline-start" />
+                  {aiPending ? "AI analizuje…" : `Doprecyzuj z AI (${aiTargets.length})`}
+                </Button>
               )}
               <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <Wand2 className="size-3" /> {stats.auto} przypisano automatycznie
