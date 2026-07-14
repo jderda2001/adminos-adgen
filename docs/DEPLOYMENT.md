@@ -174,6 +174,12 @@ sudo -u adgen ./deploy/update.sh
 Skrypt: `git pull` → `npm ci` → `prisma db push` → `build` → restart usługi.
 Baza (`prisma/adgen.db`) i `uploads/` pozostają nietknięte.
 
+> **Dane osobowe poza repo:** auto-kategoryzacja wyciągów używa reguł
+> „nazwisko → kategoria" z `config/rw-people.json`. Ten plik jest w `.gitignore`
+> (repo jest publiczne), więc `git pull` go NIE przyniesie — musi być na serwerze
+> osobno (skopiuj przez `scp`/`rsync`; wzór: `config/rw-people.example.json`).
+> Bez niego wynagrodzenia trafią do „Inne" i trzeba je ręcznie poprawić w przeglądzie.
+
 > `update.sh` woła `sudo systemctl restart adgen-finanse`. Aby użytkownik `adgen`
 > mógł to zrobić bez hasła, dodaj regułę sudoers:
 > `adgen ALL=(root) NOPASSWD: /usr/bin/systemctl restart adgen-finanse`
