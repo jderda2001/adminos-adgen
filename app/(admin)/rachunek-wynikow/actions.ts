@@ -8,8 +8,43 @@ import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { RW_MANUAL_METRICS, findRwCategory, type RwKind } from "@/lib/rw-types";
 import { aiCategorize, isAiEnabled, type AiRowInput } from "@/lib/rw-ai";
+import { netFromGrossGr, coerceVatRate, vatMatchKey } from "@/lib/rw-vat";
+import type { Prisma } from "@prisma/client";
 
 const RW_PATH = "/rachunek-wynikow";
+
+/**
+ * Zapamiętuje referencje VAT per kontrahent (RwVatRule) — po zatwierdzeniu
+ * importu i edycji. Agreguje po kluczu (ostatnia stawka wygrywa), zapisuje
+ * tylko wiersze z sensownym kluczem. Dzięki temu kolejny import podpowie stawkę.
+ */
+async function learnVatRules(
+  tx: Prisma.TransactionClient,
+  rows: { vatKey: string | null; vatRate: number; label: string | null }[]
+): Promise<void> {
+  const byKey = new Map<string, { vatRate: number; label: string | null; hits: number }>();
+  for (const r of rows) {
+    const key = (r.vatKey ?? "").trim();
+    if (!key) continue;
+    const prev = byKey.get(key);
+    byKey.set(key, {
+      vatRate: coerceVatRate(r.vatRate),
+      label: (r.label ?? prev?.label ?? null),
+      hits: (prev?.hits ?? 0) + 1,
+    });
+  }
+  for (const [matchKey, v] of byKey) {
+    await tx.rwVatRule.upsert({
+      where: { matchKey },
+      update: {
+        vatRate: v.vatRate,
+        label: v.label ?? undefined,
+        hitCount: { increment: v.hits },
+      },
+      create: { matchKey, vatRate: v.vatRate, label: v.label, hitCount: v.hits },
+    });
+  }
+}
 
 export interface RwImportSummary {
   ok: true;
@@ -73,6 +108,8 @@ export async function commitRwReviewAction(input: {
     kind: string;
     category: string;
     amountGr: number;
+    grossGr: number;
+    vatRate: number;
     description: string | null;
     contractor: string | null;
     bank: string | null;
@@ -102,6 +139,8 @@ export async function commitRwReviewAction(input: {
       kind,
       category: r.category,
       amountGr: r.amountGr,
+      grossGr: r.amountGr, // arkusz jest już netto — brutto = netto
+      vatRate: 0,
       description: clip(r.description, 300),
       contractor: clip(r.contractor, 120),
       bank: clip(r.bank, 40),
@@ -137,13 +176,15 @@ export async function commitRwReviewAction(input: {
   };
 }
 
-/** Wiersz przeglądu z importu wyciągu bankowego (kwota wprost z wyciągu) */
+/** Wiersz przeglądu z importu wyciągu bankowego (kwota BRUTTO z wyciągu + stawka VAT) */
 export interface RwBankReviewRow {
   kind: string; // PRZYCHOD | KOSZT
   month: number; // 1–12
   category: string; // kanoniczna kategoria
-  amountGr: number; // kwota ze znakiem (z wyciągu lub ręczny podział)
+  grossGr: number; // kwota BRUTTO ze znakiem (z wyciągu lub ręczny podział)
+  vatRate: number; // stawka VAT w % (23|8|5|0) — netto liczone serwerowo
   description: string | null;
+  account: string | null; // nr konta kontrahenta (do klucza reguły VAT)
   note: string | null;
   dateISO: string | null;
 }
@@ -197,6 +238,9 @@ export async function commitRwBankReviewAction(input: {
     kind: string;
     category: string;
     amountGr: number;
+    grossGr: number;
+    vatRate: number;
+    vatKey: string | null;
     description: string | null;
     contractor: string | null;
     bank: string | null;
@@ -214,14 +258,20 @@ export async function commitRwBankReviewAction(input: {
     if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
       return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
     }
-    if (!Number.isInteger(r.amountGr) || r.amountGr === 0) {
-      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota netto` };
+    if (!Number.isInteger(r.grossGr) || r.grossGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota brutto` };
+    }
+    // netto liczone SERWEROWO z brutto + stawki (autorytatywnie, bez zaufania do klienta)
+    const vatRate = coerceVatRate(r.vatRate);
+    const amountGr = netFromGrossGr(r.grossGr, vatRate);
+    if (amountGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: kwota netto wyszła zerowa` };
     }
     // znak netto musi odpowiadać kierunkowi (przychód +, koszt −)
-    if (r.kind === "PRZYCHOD" && r.amountGr <= 0) {
+    if (r.kind === "PRZYCHOD" && amountGr <= 0) {
       return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
     }
-    if (r.kind === "KOSZT" && r.amountGr >= 0) {
+    if (r.kind === "KOSZT" && amountGr >= 0) {
       return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
     }
     if (!findRwCategory(r.kind as RwKind, r.category)) {
@@ -241,13 +291,17 @@ export async function commitRwBankReviewAction(input: {
     const userNote = clip(r.note, 160);
     const dateNote = r.dateISO ? `wyciąg ${r.dateISO}` : null;
     const note = [userNote, dateNote].filter(Boolean).join(" · ") || null;
+    const description = clip(r.description, 300);
     data.push({
       year: rowYear,
       month: r.month,
       kind: r.kind,
       category: r.category,
-      amountGr: r.amountGr,
-      description: clip(r.description, 300),
+      amountGr,
+      grossGr: Math.trunc(r.grossGr),
+      vatRate,
+      vatKey: vatMatchKey({ description, account: r.account }) || null,
+      description,
       contractor: null,
       bank: "mBank",
       note,
@@ -274,6 +328,10 @@ export async function commitRwBankReviewAction(input: {
     await tx.rwEntry.createMany({
       data: data.map((d) => ({ ...d, batchId: created.id })),
     });
+    await learnVatRules(
+      tx,
+      data.map((d) => ({ vatKey: d.vatKey, vatRate: d.vatRate, label: d.description }))
+    );
     return created;
   });
 
@@ -296,7 +354,10 @@ export interface RwBatchEditRow {
   month: number;
   kind: string; // PRZYCHOD | KOSZT
   category: string;
-  amountGr: number; // ze znakiem (przychód +, koszt −)
+  amountGr: number; // NETTO ze znakiem (przychód +, koszt −)
+  grossGr: number | null; // BRUTTO ze znakiem; null dla starych wpisów (= amountGr)
+  vatRate: number | null; // stawka %; null = nieustalona (traktuj jak brutto=netto)
+  vatKey: string | null; // klucz reguły VAT (spójny import↔edycja)
   description: string | null;
   contractor: string | null;
   bank: string | null;
@@ -321,6 +382,9 @@ export async function getRwBatchForEditAction(batchId: string): Promise<RwBatchE
       kind: true,
       category: true,
       amountGr: true,
+      grossGr: true,
+      vatRate: true,
+      vatKey: true,
       description: true,
       contractor: true,
       bank: true,
@@ -366,6 +430,9 @@ export async function updateRwBatchAction(input: {
     kind: string;
     category: string;
     amountGr: number;
+    grossGr: number;
+    vatRate: number;
+    vatKey: string | null;
     description: string | null;
     contractor: string | null;
     bank: string | null;
@@ -386,25 +453,41 @@ export async function updateRwBatchAction(input: {
     if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
       return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
     }
-    if (!Number.isInteger(r.amountGr) || r.amountGr === 0) {
-      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota` };
+    // brutto: wprost z klienta, albo (stare wpisy bez brutto) = kwota netto;
+    // netto liczone SERWEROWO z brutto + stawki
+    const grossGr = Number.isInteger(r.grossGr) ? (r.grossGr as number) : r.amountGr;
+    if (!Number.isInteger(grossGr) || grossGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota brutto` };
     }
-    if (r.kind === "PRZYCHOD" && r.amountGr <= 0) {
+    const vatRate = coerceVatRate(r.vatRate);
+    const amountGr = netFromGrossGr(grossGr, vatRate);
+    if (amountGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: kwota netto wyszła zerowa` };
+    }
+    if (r.kind === "PRZYCHOD" && amountGr <= 0) {
       return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
     }
-    if (r.kind === "KOSZT" && r.amountGr >= 0) {
+    if (r.kind === "KOSZT" && amountGr >= 0) {
       return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
     }
     if (!findRwCategory(r.kind as RwKind, r.category)) {
       return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
     }
+    const description = clip(r.description, 300);
+    const vatKey =
+      (typeof r.vatKey === "string" && r.vatKey.trim()) ||
+      vatMatchKey({ description }) ||
+      null;
     data.push({
       year: r.year,
       month: r.month,
       kind: r.kind,
       category: r.category,
-      amountGr: r.amountGr,
-      description: clip(r.description, 300),
+      amountGr,
+      grossGr,
+      vatRate,
+      vatKey,
+      description,
       contractor: clip(r.contractor, 120),
       bank: clip(r.bank, 40),
       note: clip(r.note, 300),
@@ -420,6 +503,10 @@ export async function updateRwBatchAction(input: {
       return;
     }
     await tx.rwEntry.createMany({ data });
+    await learnVatRules(
+      tx,
+      data.map((d) => ({ vatKey: d.vatKey, vatRate: d.vatRate, label: d.description }))
+    );
     await tx.rwImportBatch.update({
       where: { id: batchId },
       data: { rowCount: data.length },

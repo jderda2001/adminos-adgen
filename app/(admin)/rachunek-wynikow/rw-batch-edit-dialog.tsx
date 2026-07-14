@@ -1,9 +1,12 @@
 "use client";
 
 // Edycja zaimportowanej partii — otwierana z „Historii importów". Wczytuje
-// wpisy partii, pozwala poprawić kategorię i kwotę oraz usunąć wiersze, po
-// czym PODMIENIA wszystkie wpisy partii (updateRwBatchAction). Rok i miesiąc
-// wpisów są zachowane (edycja nie zmienia dat). Pusty zestaw = usunięcie partii.
+// wpisy partii, pozwala poprawić kategorię, kwotę BRUTTO i stawkę VAT (netto
+// liczone z brutto) oraz usunąć wiersze, po czym PODMIENIA wszystkie wpisy
+// partii (updateRwBatchAction). Rok i miesiąc są zachowane (edycja nie zmienia
+// dat). Pusty zestaw = usunięcie partii. Zmiana VAT-u zapamiętuje referencję
+// per kontrahent (patrz [[rw-vat]] / RwVatRule). Stare wpisy bez brutto/stawki
+// startują jako „bez VAT" (brutto = netto) — dopóki użytkownik nie ustawi stawki.
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -27,8 +30,9 @@ import {
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
-import { RW_MONTH_LABELS, type RwKind } from "@/lib/rw-types";
+import { type RwKind } from "@/lib/rw-types";
 import { pluralPl } from "@/lib/format";
+import { netFromGrossGr, VAT_RATES, VAT_RATE_LABELS } from "@/lib/rw-vat";
 import { cn } from "@/lib/utils";
 import { formatZl } from "./rw-format";
 import { categoryGroups } from "./rw-category-groups";
@@ -43,8 +47,20 @@ const RW_MONTH_SHORT = [
   "lip", "sie", "wrz", "paź", "lis", "gru",
 ];
 
-interface EditRow extends RwBatchEditRow {
+// wiersz w UI: brutto + stawka znormalizowane (stare wpisy → brutto=netto, 0%)
+interface EditRow {
   rid: number; // stabilny klucz w UI (kolejność wczytania)
+  year: number;
+  month: number;
+  kind: string;
+  category: string;
+  grossGr: number; // BRUTTO ze znakiem
+  vatRate: number; // %
+  vatKey: string | null;
+  description: string | null;
+  contractor: string | null;
+  bank: string | null;
+  note: string | null;
 }
 
 export function RwBatchEditDialog({
@@ -83,7 +99,22 @@ export function RwBatchEditDialog({
           onOpenChange(false);
           return;
         }
-        setRows(res.rows.map((r, i) => ({ ...r, rid: i })));
+        setRows(
+          res.rows.map((r, i) => ({
+            rid: i,
+            year: r.year,
+            month: r.month,
+            kind: r.kind,
+            category: r.category,
+            grossGr: r.grossGr ?? r.amountGr, // stare wpisy: brutto = zapisana kwota
+            vatRate: r.vatRate ?? 0, // stare wpisy: bez VAT, dopóki nie ustawi stawki
+            vatKey: r.vatKey,
+            description: r.description,
+            contractor: r.contractor,
+            bank: r.bank,
+            note: r.note,
+          }))
+        );
       })
       .catch(() => {
         if (!alive) return;
@@ -97,13 +128,14 @@ export function RwBatchEditDialog({
   }, [open, batchId, onOpenChange]);
 
   const stats = useMemo(() => {
-    let revenueGr = 0;
-    let costGr = 0;
+    let revenueGr = 0; // netto
+    let costGr = 0; // netto
     let invalid = 0;
     for (const r of rows) {
-      if (r.amountGr === 0) invalid++;
-      if (r.kind === "PRZYCHOD") revenueGr += r.amountGr;
-      else costGr += r.amountGr;
+      if (r.grossGr === 0) invalid++;
+      const net = netFromGrossGr(r.grossGr, r.vatRate);
+      if (r.kind === "PRZYCHOD") revenueGr += net;
+      else costGr += net;
     }
     return { revenueGr, costGr, invalid };
   }, [rows]);
@@ -112,15 +144,23 @@ export function RwBatchEditDialog({
     setRows((prev) => prev.map((r) => (r.rid === rid ? { ...r, category } : r)));
   }
 
-  function setAmount(rid: number, magnitude: number) {
+  function setGross(rid: number, magnitude: number) {
     setRows((prev) =>
       prev.map((r) => {
         if (r.rid !== rid) return r;
         const sign = r.kind === "PRZYCHOD" ? 1 : -1;
         const mag = Number.isFinite(magnitude) ? Math.max(0, Math.round(magnitude * 100)) : 0;
-        return { ...r, amountGr: sign * mag };
+        return { ...r, grossGr: sign * mag };
       })
     );
+  }
+
+  function setVat(rid: number, vatRate: number) {
+    setRows((prev) => prev.map((r) => (r.rid === rid ? { ...r, vatRate } : r)));
+  }
+
+  function setAllVat(vatRate: number) {
+    setRows((prev) => prev.map((r) => ({ ...r, vatRate })));
   }
 
   function removeRow(rid: number) {
@@ -138,7 +178,10 @@ export function RwBatchEditDialog({
       month: r.month,
       kind: r.kind,
       category: r.category,
-      amountGr: r.amountGr,
+      amountGr: netFromGrossGr(r.grossGr, r.vatRate), // serwer i tak przelicza autorytatywnie
+      grossGr: r.grossGr,
+      vatRate: r.vatRate,
+      vatKey: r.vatKey,
       description: r.description,
       contractor: r.contractor,
       bank: r.bank,
@@ -170,9 +213,10 @@ export function RwBatchEditDialog({
         <DialogHeader>
           <DialogTitle>Edytuj import</DialogTitle>
           <DialogDescription>
-            Popraw kategorie i kwoty operacji z pliku „
-            <span className="font-medium text-foreground">{filename}</span>". Zapis
-            podmienia wszystkie wiersze tej partii; daty (miesiąc/rok) pozostają.
+            Popraw kategorie, kwoty (brutto) i stawki VAT operacji z pliku „
+            <span className="font-medium text-foreground">{filename}</span>". Kolumna
+            netto liczy się z brutto. Zapis podmienia wszystkie wiersze tej partii;
+            daty (miesiąc/rok) pozostają.
           </DialogDescription>
         </DialogHeader>
 
@@ -189,6 +233,19 @@ export function RwBatchEditDialog({
               {stats.invalid > 0 && (
                 <StatusBadge tone="red">{stats.invalid} bez kwoty</StatusBadge>
               )}
+              <span className="ml-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Ustaw VAT wszystkim:</span>
+                {VAT_RATES.map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => setAllVat(rate)}
+                    className="rounded-full border px-2 py-0.5 hover:bg-muted hover:text-foreground"
+                  >
+                    {VAT_RATE_LABELS[rate]}
+                  </button>
+                ))}
+              </span>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
@@ -197,101 +254,130 @@ export function RwBatchEditDialog({
                   <tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left">
                     <th className="w-9">Mc</th>
                     <th>Operacja</th>
-                    <th className="w-28 text-right">Kwota</th>
-                    <th className="w-56">Kategoria</th>
+                    <th className="w-28 text-right">Brutto</th>
+                    <th className="w-24">VAT</th>
+                    <th className="w-28 text-right">Netto</th>
+                    <th className="w-52">Kategoria</th>
                     <th className="w-8"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.rid} className="border-t align-top">
-                      <td className="px-2 py-1.5 text-xs text-muted-foreground tabular-nums">
-                        {RW_MONTH_SHORT[r.month - 1]}
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <div className="flex items-start gap-1.5">
-                          <span
+                  {rows.map((r) => {
+                    const netGr = netFromGrossGr(r.grossGr, r.vatRate);
+                    return (
+                      <tr key={r.rid} className="border-t align-top">
+                        <td className="px-2 py-1.5 text-xs text-muted-foreground tabular-nums">
+                          {RW_MONTH_SHORT[r.month - 1]}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <div className="flex items-start gap-1.5">
+                            <span
+                              className={cn(
+                                "mt-0.5 shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
+                                r.kind === "PRZYCHOD"
+                                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+                                  : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+                              )}
+                            >
+                              {r.kind === "PRZYCHOD" ? "P" : "K"}
+                            </span>
+                            <span
+                              className="font-medium break-words"
+                              title={r.description || r.contractor || undefined}
+                            >
+                              {r.description || r.contractor || "—"}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          <input
+                            key={`gross-${r.rid}`}
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            defaultValue={(Math.abs(r.grossGr) / 100).toFixed(2)}
+                            onChange={(e) =>
+                              setGross(r.rid, parseFloat(e.target.value || "0"))
+                            }
                             className={cn(
-                              "mt-0.5 shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
-                              r.kind === "PRZYCHOD"
-                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
-                                : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+                              "w-24 rounded-md border bg-background px-1.5 py-0.5 text-right tabular-nums focus:border-ring focus:outline-none",
+                              r.grossGr === 0 ? "border-red-400" : "border-input"
                             )}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Select
+                            value={String(r.vatRate)}
+                            onValueChange={(v) => setVat(r.rid, Number(v))}
                           >
-                            {r.kind === "PRZYCHOD" ? "P" : "K"}
-                          </span>
-                          <span
-                            className="font-medium break-words"
-                            title={r.description || r.contractor || undefined}
-                          >
-                            {r.description || r.contractor || "—"}
-                          </span>
-                        </div>
-                      </td>
-                      <td className="px-2 py-1.5 text-right">
-                        <input
-                          key={`amt-${r.rid}`}
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          defaultValue={(Math.abs(r.amountGr) / 100).toFixed(2)}
-                          onChange={(e) =>
-                            setAmount(r.rid, parseFloat(e.target.value || "0"))
-                          }
+                            <SelectTrigger size="sm" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {VAT_RATES.map((rate) => (
+                                <SelectItem key={rate} value={String(rate)}>
+                                  {VAT_RATE_LABELS[rate]}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td
                           className={cn(
-                            "w-24 rounded-md border bg-background px-1.5 py-0.5 text-right tabular-nums focus:border-ring focus:outline-none",
-                            r.amountGr === 0 ? "border-red-400" : "border-input",
-                            r.amountGr < 0 && "text-red-600 dark:text-red-400"
+                            "px-2 py-1.5 text-right tabular-nums font-medium",
+                            netGr < 0 && "text-red-600 dark:text-red-400"
                           )}
-                        />
-                      </td>
-                      <td className="px-2 py-1.5">
-                        <Select
-                          value={r.category}
-                          onValueChange={(v) => setCategory(r.rid, v)}
                         >
-                          <SelectTrigger size="sm" className="w-full">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {groupsByKind[r.kind as RwKind].map((g) => (
-                              <SelectGroup key={g.label}>
-                                <SelectLabel>{g.label}</SelectLabel>
-                                {g.items.map((name) => (
-                                  <SelectItem key={name} value={name}>
-                                    {name}
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-1 py-1.5">
-                        <button
-                          type="button"
-                          onClick={() => removeRow(r.rid)}
-                          title="Usuń wiersz z importu"
-                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-600"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                          {formatZl(netGr)}
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Select
+                            value={r.category}
+                            onValueChange={(v) => setCategory(r.rid, v)}
+                          >
+                            <SelectTrigger size="sm" className="w-full">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {groupsByKind[r.kind as RwKind].map((g) => (
+                                <SelectGroup key={g.label}>
+                                  <SelectLabel>{g.label}</SelectLabel>
+                                  {g.items.map((name) => (
+                                    <SelectItem key={name} value={name}>
+                                      {name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectGroup>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </td>
+                        <td className="px-1 py-1.5">
+                          <button
+                            type="button"
+                            onClick={() => removeRow(r.rid)}
+                            title="Usuń wiersz z importu"
+                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-600"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 text-xs text-muted-foreground">
               <span className="tabular-nums">
-                Przychody:{" "}
+                Przychody (netto):{" "}
                 <span className="font-medium text-emerald-600 dark:text-emerald-400">
                   {formatZl(stats.revenueGr)}
                 </span>
               </span>
               <span className="tabular-nums">
-                Koszty:{" "}
+                Koszty (netto):{" "}
                 <span className="font-medium text-red-600 dark:text-red-400">
                   {formatZl(stats.costGr)}
                 </span>

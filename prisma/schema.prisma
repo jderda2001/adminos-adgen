@@ -246,7 +246,10 @@ model RwEntry {
   month       Int // 1–12
   kind        String // PRZYCHOD | KOSZT
   category    String // kanoniczna nazwa kategorii z lib/rw-types (RW_CATEGORIES)
-  amountGr    Int // grosze; przychody +, koszty −
+  amountGr    Int // grosze NETTO; przychody +, koszty − (używane we wszystkich wyliczeniach)
+  grossGr     Int? // grosze BRUTTO z wyciągu (referencja; null dla starych/ręcznych wpisów)
+  vatRate     Int? // zastosowana stawka VAT w % (23|8|5|0); null = nieustalona (traktuj jak brutto=netto)
+  vatKey      String? // klucz kontrahenta do reguł VAT ([[RwVatRule.matchKey]]) — spójny import↔edycja
   description String? // opis/klient z CSV (skrócony)
   contractor  String? // kontrahent (koszty)
   bank        String? // NestBank / mBank
@@ -259,6 +262,19 @@ model RwEntry {
   @@index([year, month])
   @@index([year, kind, category])
   @@index([batchId])
+}
+
+// Referencja stawek VAT per kontrahent — uczy się przy zatwierdzaniu importu
+// i edycji. Klucz (matchKey) liczony z opisu/konta w lib/rw-vat.ts. Pozwala
+// przy kolejnym imporcie automatycznie podpowiedzieć stawkę (netto liczone
+// z brutto). Dane wrażliwe (nazwy) NIE trafiają do repo — baza jest poza gitem.
+model RwVatRule {
+  id        String   @id @default(cuid())
+  matchKey  String   @unique // znormalizowany klucz kontrahenta (opis lub „acct:<nr>")
+  vatRate   Int // 23 | 8 | 5 | 0
+  label     String? // czytelny podgląd (ostatni opis) — do wglądu w UI
+  hitCount  Int      @default(1)
+  updatedAt DateTime @updatedAt
 }
 
 // Metryki uzupełniane ręcznie per miesiąc (estymacja zysku, ETH, windykacja,

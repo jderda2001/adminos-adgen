@@ -36,7 +36,7 @@ export default async function RachunekWynikowPage({
   const requested = params.rok ? parseInt(params.rok, 10) : NaN;
   const year = years.includes(requested) ? requested : years[0];
 
-  const [entries, manual, batches] = await Promise.all([
+  const [entries, manual, batches, vatRuleRows] = await Promise.all([
     db.rwEntry.findMany({
       where: { year },
       select: { month: true, kind: true, category: true, amountGr: true },
@@ -49,7 +49,12 @@ export default async function RachunekWynikowPage({
       where: { year },
       orderBy: { createdAt: "desc" },
     }),
+    db.rwVatRule.findMany({ select: { matchKey: true, vatRate: true } }),
   ]);
+
+  // nauczone stawki VAT per kontrahent (klucz → %) — podpowiedź przy imporcie
+  const vatRules: Record<string, number> = {};
+  for (const r of vatRuleRows) vatRules[r.matchKey] = r.vatRate;
 
   const report: RwReport = buildRwReport(
     year,
@@ -109,6 +114,7 @@ export default async function RachunekWynikowPage({
         peopleRules={loadPeopleRules()}
         internalRules={loadInternalRulesConfig()}
         knownAccounts={knownAccounts}
+        vatRules={vatRules}
         aiEnabled={Boolean(process.env.ANTHROPIC_API_KEY)}
       />
     </>

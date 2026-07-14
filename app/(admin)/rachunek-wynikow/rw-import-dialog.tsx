@@ -66,6 +66,14 @@ import {
   type RwKind,
 } from "@/lib/rw-types";
 import { pluralPl } from "@/lib/format";
+import {
+  netFromGrossGr,
+  vatMatchKey,
+  coerceVatRate,
+  VAT_RATES,
+  VAT_RATE_LABELS,
+  DEFAULT_VAT_RATE,
+} from "@/lib/rw-vat";
 import { formatZl } from "./rw-format";
 import {
   commitRwReviewAction,
@@ -114,9 +122,11 @@ interface ReviewRow {
   dateISO: string | null;
   description: string | null;
   contractor: string | null;
+  account: string | null; // nr konta kontrahenta (do klucza reguły VAT)
   bank: string | null;
   note: string | null;
-  amountGr: number; // kwota ze znakiem — to trafia do bazy
+  amountGr: number; // kwota BRUTTO ze znakiem (z wyciągu / podziału); netto = netFromGrossGr(amountGr, vatRate)
+  vatRate: number; // stawka VAT w % (23|8|5|0)
   category: string; // "" = do wyboru
   source: "csv" | "auto";
   confidence: "high" | "medium" | "low";
@@ -159,6 +169,7 @@ export function RwImportDialog({
   peopleRules = [],
   internalRules = { selfNames: DEFAULT_SELF_NAMES, accounts: [] },
   knownAccounts = [],
+  vatRules = {},
   aiEnabled = false,
 }: {
   year: number;
@@ -166,6 +177,8 @@ export function RwImportDialog({
   peopleRules?: PersonRule[];
   internalRules?: InternalRulesConfig;
   knownAccounts?: BankAccount[];
+  /** nauczone stawki VAT per kontrahent (klucz → %) — podpowiedź przy imporcie */
+  vatRules?: Record<string, number>;
   /** ANTHROPIC_API_KEY obecny na serwerze → przycisk „Doprecyzuj z AI" */
   aiEnabled?: boolean;
 }) {
@@ -191,6 +204,13 @@ export function RwImportDialog({
     () => ({ PRZYCHOD: categoryGroups("PRZYCHOD"), KOSZT: categoryGroups("KOSZT") }),
     []
   );
+
+  // stawka VAT dla operacji: z nauczonej reguły (per kontrahent) albo domyślna 23%
+  function vatForRow(account: string | null, description: string | null): number {
+    const key = vatMatchKey({ account, description });
+    const learned = key ? vatRules[key] : undefined;
+    return learned !== undefined ? coerceVatRate(learned) : DEFAULT_VAT_RATE;
+  }
 
   const previewCount = useMemo(() => {
     if (!preview || isFormatError(preview)) return 0;
@@ -220,14 +240,15 @@ export function RwImportDialog({
     let auto = 0;
     let toCheck = 0;
     let missing = 0;
-    let revenueGr = 0;
-    let costGr = 0;
+    let revenueGr = 0; // netto
+    let costGr = 0; // netto
     for (const r of rows) {
       if (r.source === "auto") auto++;
       if (r.category === "") missing++;
       else if (r.source === "auto" && r.confidence !== "high") toCheck++;
-      if (r.kind === "PRZYCHOD") revenueGr += r.amountGr;
-      else costGr += r.amountGr;
+      const net = netFromGrossGr(r.amountGr, r.vatRate);
+      if (r.kind === "PRZYCHOD") revenueGr += net;
+      else costGr += net;
     }
     return { auto, toCheck, missing, revenueGr, costGr };
   }, [rows]);
@@ -252,7 +273,9 @@ export function RwImportDialog({
 
   const monthSums = useMemo(() => {
     const sums = new Map<number, number>();
-    for (const r of rows) sums.set(r.month, (sums.get(r.month) ?? 0) + r.amountGr);
+    for (const r of rows) {
+      sums.set(r.month, (sums.get(r.month) ?? 0) + netFromGrossGr(r.amountGr, r.vatRate));
+    }
     return [...sums.entries()].sort((a, b) => a[0] - b[0]);
   }, [rows]);
 
@@ -374,9 +397,11 @@ export function RwImportDialog({
             dateISO: e.dateISO,
             description: e.description || null,
             contractor: null,
+            account: e.account || null,
             bank: "mBank",
             note: null,
             amountGr: e.amountGr,
+            vatRate: vatForRow(e.account || null, e.description || null),
             category: verdict.category,
             source: "auto",
             confidence: "medium",
@@ -394,9 +419,11 @@ export function RwImportDialog({
           dateISO: e.dateISO,
           description: e.description || null,
           contractor: null,
+          account: e.account || null,
           bank: "mBank",
           note: null,
           amountGr: e.amountGr,
+          vatRate: vatForRow(e.account || null, e.description || null),
           category: s.category ?? "",
           source: "auto",
           confidence: s.confidence,
@@ -418,9 +445,11 @@ export function RwImportDialog({
           dateISO: null,
           description: e.description,
           contractor: e.contractor,
+          account: null,
           bank: e.bank,
           note: e.note,
           amountGr: e.amountGr,
+          vatRate: 0, // arkusz jest już netto
           internal: false,
           sourceFile: null,
           splitId: null,
@@ -448,6 +477,15 @@ export function RwImportDialog({
         i === index ? { ...r, category, source: "csv", confidence: "high" } : r
       )
     );
+  }
+
+  function setRowVat(index: number, vatRate: number) {
+    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, vatRate } : r)));
+  }
+
+  /** ustaw jedną stawkę VAT wszystkim operacjom (szybkie wypełnienie) */
+  function setAllVat(vatRate: number) {
+    setRows((prev) => prev.map((r) => ({ ...r, vatRate })));
   }
 
   /**
@@ -523,9 +561,11 @@ export function RwImportDialog({
           dateISO: s.row.dateISO,
           description: s.row.description || null,
           contractor: null,
+          account: s.row.account || null,
           bank: "mBank",
           note: null,
           amountGr: s.row.amountGr,
+          vatRate: vatForRow(s.row.account || null, s.row.description || null),
           category: "",
           source: "auto",
           confidence: "low",
@@ -605,8 +645,10 @@ export function RwImportDialog({
                 kind: r.kind,
                 month: r.month,
                 category: r.category,
-                amountGr: r.amountGr,
+                grossGr: r.amountGr,
+                vatRate: r.vatRate,
                 description: r.description,
+                account: r.account,
                 note: r.note,
                 dateISO: r.dateISO,
               })),
@@ -830,6 +872,25 @@ export function RwImportDialog({
               </span>
             </div>
 
+            {isBank && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Ustaw VAT wszystkim:</span>
+                {VAT_RATES.map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => setAllVat(rate)}
+                    className="rounded-full border px-2 py-0.5 hover:bg-muted hover:text-foreground"
+                  >
+                    {VAT_RATE_LABELS[rate]}
+                  </button>
+                ))}
+                <span className="text-muted-foreground/60">
+                  · kwoty w tabeli to <span className="font-medium">netto</span> (brutto pod spodem)
+                </span>
+              </div>
+            )}
+
             {showSkipped && skipped.length > 0 && (
               <div className="max-h-40 overflow-y-auto rounded-lg border bg-muted/30">
                 <div className="flex items-center justify-between px-3 py-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
@@ -873,7 +934,8 @@ export function RwImportDialog({
                     <th className="w-9">Mc</th>
                     <th>Operacja</th>
                     <th className="w-28 text-right">Kwota</th>
-                    <th className="w-60">Kategoria</th>
+                    {isBank && <th className="w-24">VAT</th>}
+                    <th className="w-52">Kategoria</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -882,6 +944,8 @@ export function RwImportDialog({
                       r.category === "" ||
                       (r.source === "auto" && r.confidence !== "high");
                     const isSplit = r.splitId !== null;
+                    const grossGr = r.amountGr;
+                    const netGr = netFromGrossGr(grossGr, r.vatRate);
                     return (
                       <tr
                         key={isSplit ? `s${r.splitId}-${r.splitRole}` : `r${i}`}
@@ -954,29 +1018,62 @@ export function RwImportDialog({
                         </td>
                         <td
                           className={cn(
-                            "px-2 py-1.5 text-right tabular-nums font-medium",
-                            r.amountGr < 0 && "text-red-600 dark:text-red-400"
+                            "px-2 py-1.5 text-right tabular-nums",
+                            netGr < 0 && "text-red-600 dark:text-red-400"
                           )}
                         >
                           {isSplit && r.splitRole === "a" ? (
-                            <input
-                              key={`net-${r.splitId}`}
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              defaultValue={(Math.abs(r.amountGr) / 100).toFixed(2)}
-                              onChange={(e) =>
-                                setSplitNet(
-                                  r.splitId as number,
-                                  Math.round(parseFloat(e.target.value || "0") * 100)
-                                )
-                              }
-                              className="w-24 rounded-md border border-input bg-background px-1.5 py-0.5 text-right tabular-nums focus:border-ring focus:outline-none"
-                            />
+                            <div className="flex flex-col items-end gap-0.5">
+                              <input
+                                key={`gross-${r.splitId}`}
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                defaultValue={(Math.abs(grossGr) / 100).toFixed(2)}
+                                onChange={(e) =>
+                                  setSplitNet(
+                                    r.splitId as number,
+                                    Math.round(parseFloat(e.target.value || "0") * 100)
+                                  )
+                                }
+                                className="w-24 rounded-md border border-input bg-background px-1.5 py-0.5 text-right tabular-nums focus:border-ring focus:outline-none"
+                              />
+                              {r.vatRate !== 0 && (
+                                <span className="text-[10px] font-normal text-muted-foreground">
+                                  netto {formatZl(netGr)}
+                                </span>
+                              )}
+                            </div>
                           ) : (
-                            formatZl(r.amountGr)
+                            <div className="flex flex-col items-end leading-tight">
+                              <span className="font-medium">{formatZl(netGr)}</span>
+                              {r.vatRate !== 0 && (
+                                <span className="text-[10px] font-normal text-muted-foreground">
+                                  brutto {formatZl(grossGr)}
+                                </span>
+                              )}
+                            </div>
                           )}
                         </td>
+                        {isBank && (
+                          <td className="px-2 py-1.5">
+                            <Select
+                              value={String(r.vatRate)}
+                              onValueChange={(v) => setRowVat(i, Number(v))}
+                            >
+                              <SelectTrigger size="sm" className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {VAT_RATES.map((rate) => (
+                                  <SelectItem key={rate} value={String(rate)}>
+                                    {VAT_RATE_LABELS[rate]}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                        )}
                         <td className="px-2 py-1.5">
                           <Select value={r.category} onValueChange={(v) => setRowCategory(i, v)}>
                             <SelectTrigger
