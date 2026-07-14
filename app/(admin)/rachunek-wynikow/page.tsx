@@ -3,6 +3,8 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { buildRwReport, type RwReport } from "@/lib/rw";
 import { loadPeopleRules } from "@/lib/rw-people";
+import { loadInternalRulesConfig } from "@/lib/rw-accounts";
+import type { BankAccount } from "@/lib/bank-parse";
 import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { RwView, type RwBatchRow } from "./rw-view";
@@ -68,6 +70,32 @@ export default async function RachunekWynikowPage({
     createdAt: b.createdAt.toISOString(),
   }));
 
+  // konta znane z poprzednich importów wyciągów (kontrola kompletności + dedup)
+  const knownAccounts: BankAccount[] = [];
+  {
+    const byNumber = new Map<string, BankAccount>();
+    for (const b of batches) {
+      if (!b.accountsJson) continue;
+      try {
+        const arr: unknown = JSON.parse(b.accountsJson);
+        if (!Array.isArray(arr)) continue;
+        for (const a of arr) {
+          if (
+            a &&
+            typeof (a as BankAccount).number === "string" &&
+            typeof (a as BankAccount).name === "string"
+          ) {
+            const acc = a as BankAccount;
+            if (!byNumber.has(acc.number)) byNumber.set(acc.number, acc);
+          }
+        }
+      } catch {
+        // uszkodzony JSON w starej partii — pomiń
+      }
+    }
+    knownAccounts.push(...byNumber.values());
+  }
+
   return (
     <>
       <PageHeader
@@ -79,6 +107,8 @@ export default async function RachunekWynikowPage({
         years={years}
         batches={batchRows}
         peopleRules={loadPeopleRules()}
+        internalRules={loadInternalRulesConfig()}
+        knownAccounts={knownAccounts}
       />
     </>
   );

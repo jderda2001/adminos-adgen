@@ -51,3 +51,5 @@ prisma/adgen.db-journal
 # dane osobowe poza repo (nazwiska → kategorie wynagrodzeń); na prod przez SSH.
 # Wzór: config/rw-people.example.json (śledzony). Realny plik NIE trafia do repo.
 config/rw-people.json
+# numery kont firmowych (dedup przelewów własnych) — wzór: rw-accounts.example.json
+config/rw-accounts.json

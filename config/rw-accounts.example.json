@@ -1,0 +1,22 @@
+{
+  "selfNames": ["adgen sp"],
+  "accounts": [
+    { "match": "11114020040000390200000001", "name": "Konto główne" },
+    { "match": "22224020040000390200000002", "name": "Wydatki operacyjne" },
+    {
+      "match": "33334020040000390200000003",
+      "name": "Oszczędności",
+      "transferCategory": "Środki przelane na oszczędności"
+    },
+    {
+      "match": "44441870000000000000000004",
+      "name": "Nest — premie zespołu",
+      "transferCategory": "Zaliczka na premie zespołu"
+    },
+    {
+      "match": "55551870000000000000000005",
+      "name": "Nest — CIT",
+      "transferCategory": "Zaliczka na podatek CIT"
+    }
+  ]
+}

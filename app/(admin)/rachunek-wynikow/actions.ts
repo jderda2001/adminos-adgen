@@ -144,20 +144,32 @@ export interface RwBankReviewRow {
 }
 
 /**
- * Zatwierdza operacje z wyciągu bankowego (mBank) PO przeglądzie. Jeden plik
- * ma OBA kierunki — kind jest per-wiersz. Kwota przychodzi z klienta (wprost
- * z wyciągu albo z ręcznego podziału operacji na kategorie); serwer waliduje
- * typ, znak (przychód +, koszt −) i kategorię. Zapis jako jedna partia
- * (kind = „BANK").
+ * Zatwierdza operacje z wyciągu bankowego (mBank) PO przeglądzie. Wyciąg może
+ * pochodzić z WIELU plików/kont — kind jest per-wiersz, a partia zapamiętuje
+ * listę kont (kontrola kompletności następnych importów). Kwota przychodzi
+ * z klienta (wprost z wyciągu albo z ręcznego podziału na kategorie); serwer
+ * waliduje typ, znak (przychód +, koszt −) i kategorię. Jedna partia (BANK).
  */
 export async function commitRwBankReviewAction(input: {
   year: number;
   filename: string;
   rows: RwBankReviewRow[];
+  /** konta z preambuł wyciągów: [{name, number}] — zapamiętywane w partii */
+  accounts?: { name: string; number: string }[];
 }): Promise<RwImportResult> {
   await requireAdmin();
 
   const { year, filename, rows } = input;
+  const accounts = (Array.isArray(input.accounts) ? input.accounts : [])
+    .filter(
+      (a) =>
+        a &&
+        typeof a.name === "string" &&
+        typeof a.number === "string" &&
+        /^\d{10,34}$/.test(a.number.replace(/\D/g, ""))
+    )
+    .slice(0, 20)
+    .map((a) => ({ name: a.name.slice(0, 80), number: a.number.replace(/\D/g, "") }));
   if (!Number.isInteger(year) || year < 2020 || year > 2100) {
     return { ok: false, error: "Nieprawidłowy rok importu" };
   }
@@ -236,6 +248,7 @@ export async function commitRwBankReviewAction(input: {
         kind: "BANK",
         year,
         rowCount: data.length,
+        accountsJson: accounts.length > 0 ? JSON.stringify(accounts) : null,
       },
     });
     await tx.rwEntry.createMany({

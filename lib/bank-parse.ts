@@ -23,9 +23,18 @@ export interface BankRow {
   kind: RwKind; // PRZYCHOD gdy +, KOSZT gdy −
 }
 
+/** Konto z preambuły wyciągu („#dla rachunków:" — „Nazwa - 26 cyfr") */
+export interface BankAccount {
+  name: string; // nazwa nadana w mBanku (np. „Wydatki operacyjne"); "" gdy brak
+  number: string; // same cyfry (26 dla PL)
+}
+
 export interface BankParseResult {
   bank: "mBank";
   rows: BankRow[];
+  /** konta objęte wyciągiem (z preambuły) — do dedupu przelewów własnych
+      i kontroli kompletności („brakuje kont vs poprzedni import") */
+  accounts: BankAccount[];
   /** wiersze pominięte (nie-transakcyjne: podsumowania, błędne daty/kwoty) */
   skipped: { line: number; reason: string }[];
   skippedEmpty: number;
@@ -68,6 +77,26 @@ export function parseMbankCsv(text: string): BankParseOutcome {
   const idxAcct = header.indexOf("rachunek");
   const idxCat = header.indexOf("kategoria");
   const idxAmt = header.indexOf("kwota");
+
+  // konta objęte wyciągiem — sekcja preambuły „#dla rachunków:", po niej linie
+  // w formacie „Nazwa - 99 1140 …" (nazwa nadana w mBanku + numer konta)
+  const accounts: BankAccount[] = [];
+  for (let i = 0; i < h; i++) {
+    const first = (rows[i][0] ?? "").trim();
+    if (!first.replace(/^#/, "").trim().toLowerCase().startsWith("dla rachunk")) continue;
+    for (let j = i + 1; j < h; j++) {
+      const cell = (rows[j][0] ?? "").trim();
+      if (cell === "" || cell.startsWith("#")) break;
+      const number = cell.replace(/\D/g, "");
+      if (number.length < 16) continue; // nie wygląda na numer konta
+      const name = cell
+        .replace(/[-–—]?\s*[\d ]+$/, "") // utnij numer z końca
+        .replace(/\s*[-–—]\s*$/, "")
+        .trim();
+      accounts.push({ name, number });
+    }
+    break;
+  }
 
   const out: BankRow[] = [];
   const skipped: { line: number; reason: string }[] = [];
@@ -115,5 +144,5 @@ export function parseMbankCsv(text: string): BankParseOutcome {
     });
   }
 
-  return { bank: "mBank", rows: out, skipped, skippedEmpty };
+  return { bank: "mBank", rows: out, accounts, skipped, skippedEmpty };
 }

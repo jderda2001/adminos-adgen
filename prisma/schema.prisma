@@ -228,12 +228,14 @@ model RevenuePlanNote {
 // Kwoty w groszach: przychody dodatnie, koszty/odłożone/CIT ujemne.
 
 model RwImportBatch {
-  id        String   @id @default(cuid())
-  filename  String
-  kind      String // PRZYCHOD | KOSZT
-  year      Int
-  rowCount  Int
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  filename     String
+  kind         String // PRZYCHOD | KOSZT | BANK
+  year         Int
+  rowCount     Int
+  /// JSON: [{name, number}] — konta z preambuły wyciągu (kontrola kompletności)
+  accountsJson String?
+  createdAt    DateTime @default(now())
 
   entries RwEntry[]
 }

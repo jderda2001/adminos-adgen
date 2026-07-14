@@ -6,6 +6,8 @@
 import { useRouter, usePathname } from "next/navigation";
 import type { RwReport } from "@/lib/rw";
 import type { PersonRule } from "@/lib/rw-categorize";
+import type { InternalRulesConfig } from "@/lib/rw-internal";
+import type { BankAccount } from "@/lib/bank-parse";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -36,11 +38,15 @@ export function RwView({
   years,
   batches,
   peopleRules,
+  internalRules,
+  knownAccounts,
 }: {
   report: RwReport;
   years: number[];
   batches: RwBatchRow[];
   peopleRules: PersonRule[];
+  internalRules: InternalRulesConfig;
+  knownAccounts: BankAccount[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -70,7 +76,12 @@ export function RwView({
         </Select>
         <div className="ml-auto flex items-center gap-2">
           <RwBatchesSheet batches={batches} />
-          <RwImportDialog year={report.year} peopleRules={peopleRules} />
+          <RwImportDialog
+            year={report.year}
+            peopleRules={peopleRules}
+            internalRules={internalRules}
+            knownAccounts={knownAccounts}
+          />
         </div>
       </div>
 
@@ -90,6 +101,8 @@ export function RwView({
             <RwImportDialog
               year={report.year}
               peopleRules={peopleRules}
+              internalRules={internalRules}
+              knownAccounts={knownAccounts}
               trigger={<Button size="sm">Importuj CSV</Button>}
             />
           </EmptyState>
