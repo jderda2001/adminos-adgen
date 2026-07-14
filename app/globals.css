@@ -49,80 +49,79 @@
 }
 
 :root {
-  /* Paleta: miękka neutralna (lekko chłodna) + indygo jako kolor marki.
-     Minimalistycznie: jasne płótno aplikacji, białe karty, subtelne obramowania. */
-  --background: oklch(0.985 0.002 255); /* płótno aplikacji */
-  --foreground: oklch(0.22 0.01 260); /* tekst — miękka czerń, nie #000 */
-  --card: oklch(1 0 0);
-  --card-foreground: var(--foreground);
-  --popover: oklch(1 0 0);
-  --popover-foreground: var(--foreground);
-  --primary: oklch(0.5 0.16 264); /* indygo — marka */
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.965 0.004 260);
-  --secondary-foreground: oklch(0.3 0.012 262);
-  --muted: oklch(0.965 0.004 260);
-  --muted-foreground: oklch(0.53 0.012 262);
-  --accent: oklch(0.955 0.012 264); /* subtelny indygo tint (hover) */
-  --accent-foreground: oklch(0.4 0.08 264);
-  --destructive: oklch(0.58 0.216 25);
-  --border: oklch(0.918 0.005 260);
-  --input: oklch(0.918 0.005 260);
-  --ring: oklch(0.5 0.16 264);
-  --chart-1: oklch(0.55 0.17 264); /* indygo */
-  --chart-2: oklch(0.68 0.14 165); /* zieleń */
-  --chart-3: oklch(0.78 0.15 80); /* bursztyn */
-  --chart-4: oklch(0.62 0.2 20); /* czerwień */
-  --chart-5: oklch(0.62 0.17 305); /* fiolet */
-  --radius: 0.7rem;
-  --sidebar: oklch(1 0 0);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: oklch(0.5 0.16 264);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.012 264);
-  --sidebar-accent-foreground: oklch(0.4 0.08 264);
-  --sidebar-border: oklch(0.922 0.005 260);
-  --sidebar-ring: oklch(0.5 0.16 264);
-  /* Cienie — miękka, delikatna elewacja */
-  --shadow-card: 0 1px 2px 0 oklch(0.2 0.02 262 / 0.04),
-    0 1px 3px 0 oklch(0.2 0.02 262 / 0.06);
-  --shadow-pop: 0 10px 30px -12px oklch(0.2 0.02 262 / 0.22);
+  /* Paleta „Apple-minimal": białe płótno, grafit #171717 jako tekst,
+     pomarańcz #ff710c jako jedyny akcent. Hairline obramowania, delikatne cienie. */
+  --background: #ffffff; /* płótno aplikacji — czysta biel */
+  --foreground: #171717; /* tekst — grafit */
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #ff710c; /* pomarańcz — akcent / główne akcje */
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5; /* jasnoszare wypełnienia */
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373; /* tekst drugorzędny */
+  --accent: #fff1e7; /* delikatny pomarańczowy tint (hover) */
+  --accent-foreground: #b8540a;
+  --destructive: #e5484d;
+  --border: #ececec; /* hairline */
+  --input: #e4e4e4;
+  --ring: #ff710c;
+  --chart-1: #ff710c; /* pomarańcz (marka) */
+  --chart-2: #171717; /* grafit */
+  --chart-3: #f5a623; /* bursztyn */
+  --chart-4: #b0b0b0; /* szary */
+  --chart-5: #ffb37a; /* jasny pomarańcz */
+  --radius: 0.8rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #171717;
+  --sidebar-primary: #ff710c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #fff1e7;
+  --sidebar-accent-foreground: #b8540a;
+  --sidebar-border: #f0f0f0;
+  --sidebar-ring: #ff710c;
+  /* Cienie — bardzo delikatna elewacja (Apple) */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.04), 0 1px 3px 0 rgb(0 0 0 / 0.05);
+  --shadow-pop: 0 12px 32px -12px rgb(0 0 0 / 0.18);
 }
 
 .dark {
-  --background: oklch(0.17 0.008 264);
-  --foreground: oklch(0.96 0.003 260);
-  --card: oklch(0.215 0.01 264);
-  --card-foreground: oklch(0.96 0.003 260);
-  --popover: oklch(0.215 0.01 264);
-  --popover-foreground: oklch(0.96 0.003 260);
-  --primary: oklch(0.7 0.14 264);
-  --primary-foreground: oklch(0.17 0.02 264);
-  --secondary: oklch(0.27 0.012 264);
-  --secondary-foreground: oklch(0.96 0.003 260);
-  --muted: oklch(0.27 0.012 264);
-  --muted-foreground: oklch(0.7 0.012 262);
-  --accent: oklch(0.3 0.03 264);
-  --accent-foreground: oklch(0.9 0.02 264);
-  --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.7 0.14 264);
-  --chart-1: oklch(0.66 0.16 264);
-  --chart-2: oklch(0.72 0.14 165);
-  --chart-3: oklch(0.8 0.14 80);
-  --chart-4: oklch(0.66 0.19 20);
-  --chart-5: oklch(0.68 0.16 305);
-  --sidebar: oklch(0.2 0.01 264);
-  --sidebar-foreground: oklch(0.96 0.003 260);
-  --sidebar-primary: oklch(0.7 0.14 264);
-  --sidebar-primary-foreground: oklch(0.17 0.02 264);
-  --sidebar-accent: oklch(0.3 0.03 264);
-  --sidebar-accent-foreground: oklch(0.9 0.02 264);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.7 0.14 264);
-  --shadow-card: 0 1px 2px 0 oklch(0 0 0 / 0.3);
-  --shadow-pop: 0 10px 30px -12px oklch(0 0 0 / 0.5);
+  --background: #171717; /* grafit — ciemne płótno */
+  --foreground: #f5f5f5;
+  --card: #1f1f1f;
+  --card-foreground: #f5f5f5;
+  --popover: #1f1f1f;
+  --popover-foreground: #f5f5f5;
+  --primary: #ff7a1a; /* pomarańcz, lekko rozjaśniony na ciemnym */
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #f5f5f5;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent: #3a2415; /* ciemny pomarańczowy tint (hover) */
+  --accent-foreground: #ffb37a;
+  --destructive: #ff6166;
+  --border: rgb(255 255 255 / 0.1);
+  --input: rgb(255 255 255 / 0.14);
+  --ring: #ff7a1a;
+  --chart-1: #ff7a1a;
+  --chart-2: #e5e5e5;
+  --chart-3: #f5a623;
+  --chart-4: #8a8a8a;
+  --chart-5: #ffb37a;
+  --sidebar: #1a1a1a;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #ff7a1a;
+  --sidebar-primary-foreground: #171717;
+  --sidebar-accent: #3a2415;
+  --sidebar-accent-foreground: #ffb37a;
+  --sidebar-border: rgb(255 255 255 / 0.1);
+  --sidebar-ring: #ff7a1a;
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+  --shadow-pop: 0 12px 32px -12px rgb(0 0 0 / 0.6);
 }
 
 @theme inline {
