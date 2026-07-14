@@ -1,13 +1,17 @@
 "use client";
 
-// Import CSV rachunku wyników — trzy kroki:
-//   1) wybór pliku (parsowanie LOKALNE, wykrycie typu, błędy struktury)
-//   2) PRZEGLĄD: kategorie przypisane automatycznie (kontrahent/opis → kategoria),
-//      każda operacja edytowalna w dropdownie; niepewne oznaczone „do sprawdzenia"
-//   3) zatwierdzenie → commitRwReviewAction (serwer waliduje każde pole)
+// Import CSV rachunku wyników — dwa źródła, wykrywane automatycznie:
 //
-// Kategorie decydowane są u klienta, więc do zatwierdzenia wysyłamy wiersze
-// (nie plik). Serwer waliduje miesiąc, kwotę i przynależność kategorii.
+//   • WYCIĄG mBank (surowy eksport, średnik, kwoty BRUTTO, oba kierunki) —
+//     główny tryb: dzieli przychody/koszty po znaku, liczy miesiąc z daty,
+//     proponuje kategorię i stawkę VAT; netto liczone brutto/(1+VAT).
+//   • Arkusz „Rachunek wyników" (gotowe kolumny Miesiąc/Kategoria/Netto) —
+//     tryb zgodny ze starym importem (jeden kierunek na plik).
+//
+// Krok 1: wybór pliku (parsowanie LOKALNE, wykrycie źródła, błędy struktury).
+// Krok 2: PRZEGLĄD — każda operacja edytowalna (kategoria, przy wyciągu też
+//         stawka VAT); niepewne oznaczone „do sprawdzenia".
+// Krok 3: zatwierdzenie → akcja serwerowa (waliduje i liczy netto na nowo).
 
 import { useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -35,6 +39,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
 import { parseRwCsv, type RwParseResult, type RwParseIssue } from "@/lib/rw-parse";
+import {
+  parseMbankCsv,
+  guessVatRate,
+  netFromGrossGr,
+  type BankParseResult,
+  type VatRate,
+} from "@/lib/bank-parse";
 import { suggestCategory, type PersonRule } from "@/lib/rw-categorize";
 import {
   RW_CATEGORIES,
@@ -45,7 +56,12 @@ import {
 } from "@/lib/rw-types";
 import { pluralPl } from "@/lib/format";
 import { formatZl } from "./rw-format";
-import { commitRwReviewAction, type RwReviewRow } from "./actions";
+import {
+  commitRwReviewAction,
+  commitRwBankReviewAction,
+  type RwReviewRow,
+  type RwBankReviewRow,
+} from "./actions";
 import { cn } from "@/lib/utils";
 
 const MAX_ISSUES_SHOWN = 10;
@@ -53,13 +69,18 @@ const RW_MONTH_SHORT = [
   "sty", "lut", "mar", "kwi", "maj", "cze",
   "lip", "sie", "wrz", "paź", "lis", "gru",
 ];
+const VAT_RATES: VatRate[] = [23, 8, 0];
 
-type Preview = RwParseResult | { formatError: string };
+type Parsed =
+  | { mode: "bank"; bank: BankParseResult }
+  | { mode: "sheet"; sheet: RwParseResult };
+type Preview = Parsed | { formatError: string };
+
 function isFormatError(p: Preview): p is { formatError: string } {
   return "formatError" in p;
 }
 
-/** opcje kategorii pogrupowane sekcjami arkusza (do dropdownu) */
+/** opcje kategorii pogrupowane sekcjami arkusza (do dropdownu), per kierunek */
 function categoryGroups(kind: RwKind) {
   const cats = RW_CATEGORIES.filter((c) => c.kind === kind);
   const buckets = [...new Set(cats.map((c) => c.bucket))] as RwBucket[];
@@ -70,14 +91,18 @@ function categoryGroups(kind: RwKind) {
 }
 
 interface ReviewRow {
+  kind: RwKind; // per-wiersz (wyciąg) lub kierunek arkusza
   month: number;
+  dateISO: string | null; // tylko wyciąg
   description: string | null;
   contractor: string | null;
   bank: string | null;
   note: string | null;
-  amountGr: number;
+  grossAmountGr: number | null; // tylko wyciąg (null → arkusz, bez VAT)
+  vatRate: VatRate; // używane gdy grossAmountGr != null
+  amountGr: number; // NETTO, ze znakiem — to trafia do bazy
   category: string; // "" = do wyboru
-  source: "csv" | "auto"; // skąd wzięła się kategoria
+  source: "csv" | "auto";
   confidence: "high" | "medium" | "low";
 }
 
@@ -112,30 +137,53 @@ export function RwImportDialog({
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"select" | "review">("select");
   const [fileName, setFileName] = useState("");
-  const [kind, setKind] = useState<RwKind>("KOSZT");
+  const [mode, setMode] = useState<"bank" | "sheet">("bank");
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [pending, startTransition] = useTransition();
   const parseToken = useRef(0);
 
-  const parsed = preview && !isFormatError(preview) ? preview : null;
-  const parsedCount = parsed?.entries.length ?? 0;
-  const canProceed =
-    parsed !== null && parsed.errors.length === 0 && parsedCount > 0;
+  const groupsByKind = useMemo(
+    () => ({ PRZYCHOD: categoryGroups("PRZYCHOD"), KOSZT: categoryGroups("KOSZT") }),
+    []
+  );
 
-  const groups = useMemo(() => categoryGroups(kind), [kind]);
+  // liczba operacji z podglądu (przed przeglądem)
+  const previewCount = useMemo(() => {
+    if (!preview || isFormatError(preview)) return 0;
+    return preview.mode === "bank" ? preview.bank.rows.length : preview.sheet.entries.length;
+  }, [preview]);
+
+  const sheetErrors =
+    preview && !isFormatError(preview) && preview.mode === "sheet"
+      ? preview.sheet.errors
+      : [];
+  const bankSkipped =
+    preview && !isFormatError(preview) && preview.mode === "bank"
+      ? preview.bank.skipped
+      : [];
+
+  const canProceed =
+    preview !== null &&
+    !isFormatError(preview) &&
+    previewCount > 0 &&
+    (preview.mode === "bank" || preview.sheet.errors.length === 0);
 
   // statystyki przeglądu
   const stats = useMemo(() => {
     let auto = 0;
     let toCheck = 0;
     let missing = 0;
+    let revenueGr = 0;
+    let costGr = 0;
     for (const r of rows) {
       if (r.source === "auto") auto++;
       if (r.category === "") missing++;
       else if (r.source === "auto" && r.confidence !== "high") toCheck++;
+      if (r.kind === "PRZYCHOD") revenueGr += r.amountGr;
+      else costGr += r.amountGr;
     }
-    return { auto, toCheck, missing };
+    return { auto, toCheck, missing, revenueGr, costGr };
   }, [rows]);
 
   const monthSums = useMemo(() => {
@@ -150,6 +198,7 @@ export function RwImportDialog({
     setFileName("");
     setRows([]);
     setPreview(null);
+    setMode("bank");
   }
 
   function handleOpenChange(next: boolean) {
@@ -166,7 +215,22 @@ export function RwImportDialog({
     try {
       const text = await f.text();
       if (token !== parseToken.current) return;
-      setPreview(parseRwCsv(text));
+      // najpierw wyciąg mBank (średnik), potem arkusz RW (przecinek)
+      const mb = parseMbankCsv(text);
+      if (!("formatError" in mb) && mb.rows.length > 0) {
+        setPreview({ mode: "bank", bank: mb });
+        return;
+      }
+      const sh = parseRwCsv(text);
+      if (!("formatError" in sh)) {
+        setPreview({ mode: "sheet", sheet: sh });
+        return;
+      }
+      setPreview({
+        formatError:
+          "Nierozpoznany plik. Wgraj surowy wyciąg mBank (CSV „Lista operacji”) " +
+          "albo arkusz „Rachunek wyników” (kolumny Miesiąc/Kategoria/Netto).",
+      });
     } catch {
       if (token !== parseToken.current) return;
       setPreview({ formatError: "Nie udało się odczytać pliku — spróbuj ponownie." });
@@ -174,41 +238,72 @@ export function RwImportDialog({
   }
 
   function proceedToReview() {
-    if (!parsed || !canProceed) return;
-    setKind(parsed.kind);
-    // przypisz kategorie: z pliku jeśli były, inaczej propozycja automatyczna
-    const built: ReviewRow[] = parsed.entries.map((e) => {
-      if (e.category) {
+    if (!preview || isFormatError(preview) || !canProceed) return;
+    setMode(preview.mode);
+
+    if (preview.mode === "bank") {
+      const built: ReviewRow[] = preview.bank.rows.map((e) => {
+        const vatRate = guessVatRate({ description: e.description, bankCategory: e.bankCategory });
+        const s = suggestCategory(e.kind, { description: e.description }, peopleRules);
         return {
+          kind: e.kind,
           month: e.month,
+          dateISO: e.dateISO,
+          description: e.description || null,
+          contractor: null,
+          bank: "mBank",
+          note: null,
+          grossAmountGr: e.grossAmountGr,
+          vatRate,
+          amountGr: netFromGrossGr(e.grossAmountGr, vatRate),
+          category: s.category ?? "",
+          source: "auto",
+          confidence: s.confidence,
+        };
+      });
+      setRows(built);
+    } else {
+      const sheet = preview.sheet;
+      const built: ReviewRow[] = sheet.entries.map((e) => {
+        if (e.category) {
+          return {
+            kind: sheet.kind,
+            month: e.month,
+            dateISO: null,
+            description: e.description,
+            contractor: e.contractor,
+            bank: e.bank,
+            note: e.note,
+            grossAmountGr: null,
+            vatRate: 23,
+            amountGr: e.amountGr,
+            category: e.category,
+            source: "csv",
+            confidence: "high",
+          };
+        }
+        const s = suggestCategory(sheet.kind, {
+          description: e.description,
+          contractor: e.contractor,
+        }, peopleRules);
+        return {
+          kind: sheet.kind,
+          month: e.month,
+          dateISO: null,
           description: e.description,
           contractor: e.contractor,
           bank: e.bank,
           note: e.note,
+          grossAmountGr: null,
+          vatRate: 23,
           amountGr: e.amountGr,
-          category: e.category,
-          source: "csv",
-          confidence: "high",
+          category: s.category ?? "",
+          source: "auto",
+          confidence: s.confidence,
         };
-      }
-      const s = suggestCategory(
-        e.kind,
-        { description: e.description, contractor: e.contractor },
-        peopleRules
-      );
-      return {
-        month: e.month,
-        description: e.description,
-        contractor: e.contractor,
-        bank: e.bank,
-        note: e.note,
-        amountGr: e.amountGr,
-        category: s.category ?? "",
-        source: "auto",
-        confidence: s.confidence,
-      };
-    });
-    setRows(built);
+      });
+      setRows(built);
+    }
     setStep("review");
   }
 
@@ -220,27 +315,51 @@ export function RwImportDialog({
     );
   }
 
+  function setRowVat(index: number, vatRate: VatRate) {
+    setRows((prev) =>
+      prev.map((r, i) => {
+        if (i !== index || r.grossAmountGr === null) return r;
+        return { ...r, vatRate, amountGr: netFromGrossGr(r.grossAmountGr, vatRate) };
+      })
+    );
+  }
+
   function handleCommit() {
     if (stats.missing > 0) {
       toast.error("Uzupełnij kategorie dla wszystkich operacji");
       return;
     }
-    const payload: RwReviewRow[] = rows.map((r) => ({
-      month: r.month,
-      category: r.category,
-      amountGr: r.amountGr,
-      description: r.description,
-      contractor: r.contractor,
-      bank: r.bank,
-      note: r.note,
-    }));
     startTransition(async () => {
-      const result = await commitRwReviewAction({
-        year,
-        kind,
-        filename: fileName,
-        rows: payload,
-      });
+      const result =
+        mode === "bank"
+          ? await commitRwBankReviewAction({
+              year,
+              filename: fileName,
+              rows: rows.map<RwBankReviewRow>((r) => ({
+                kind: r.kind,
+                month: r.month,
+                category: r.category,
+                grossAmountGr: r.grossAmountGr as number,
+                vatRate: r.vatRate,
+                description: r.description,
+                note: r.note,
+                dateISO: r.dateISO,
+              })),
+            })
+          : await commitRwReviewAction({
+              year,
+              kind: rows[0]?.kind ?? "KOSZT",
+              filename: fileName,
+              rows: rows.map<RwReviewRow>((r) => ({
+                month: r.month,
+                category: r.category,
+                amountGr: r.amountGr,
+                description: r.description,
+                contractor: r.contractor,
+                bank: r.bank,
+                note: r.note,
+              })),
+            });
       if (result.ok) {
         const monthNames = result.months.map((m) => RW_MONTH_LABELS[m - 1]).join(", ");
         toast.success(
@@ -255,6 +374,8 @@ export function RwImportDialog({
     });
   }
 
+  const isBank = mode === "bank";
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
@@ -267,28 +388,32 @@ export function RwImportDialog({
       <DialogContent
         className={cn(
           "flex max-h-[90vh] flex-col",
-          step === "review" ? "sm:max-w-3xl" : "sm:max-w-lg"
+          step === "review" ? "sm:max-w-4xl" : "sm:max-w-lg"
         )}
       >
         <DialogHeader>
           <DialogTitle>
             {step === "select"
               ? "Import CSV — rachunek wyników"
-              : "Sprawdź przypisane kategorie"}
+              : "Sprawdź operacje przed zatwierdzeniem"}
           </DialogTitle>
           <DialogDescription>
             {step === "select" ? (
               <>
-                Import zapisze dane do roku{" "}
-                <span className="font-medium text-foreground">{year}</span>.
-                Obsługiwane pliki: przychody lub koszty z arkusza „Rachunek
-                wyników” (typ wykrywany automatycznie z nagłówka).
+                Wgraj <span className="font-medium text-foreground">surowy wyciąg mBank</span>{" "}
+                (CSV „Lista operacji”) albo arkusz „Rachunek wyników”. Import zapisze
+                dane do roku <span className="font-medium text-foreground">{year}</span>.
+              </>
+            ) : isBank ? (
+              <>
+                Kwoty z wyciągu są <span className="font-medium text-foreground">brutto</span> —
+                netto liczone jest z VAT (÷1,23 / ÷1,08). Sprawdź kierunek,
+                kategorię i stawkę VAT; popraw w razie potrzeby.
               </>
             ) : (
               <>
-                Kategorie przypisane automatycznie na podstawie kontrahenta i
-                opisu. Sprawdź i popraw w razie potrzeby — zatwierdzenie zapisze
-                dane do roku{" "}
+                Kategorie przypisane automatycznie. Sprawdź i popraw — zatwierdzenie
+                zapisze dane do roku{" "}
                 <span className="font-medium text-foreground">{year}</span>.
               </>
             )}
@@ -318,35 +443,37 @@ export function RwImportDialog({
               </div>
             )}
 
-            {parsed && (
+            {preview && !isFormatError(preview) && (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Wykryty typ:</span>
-                  <StatusBadge tone={parsed.kind === "PRZYCHOD" ? "green" : "red"}>
-                    {parsed.kind === "PRZYCHOD" ? "Przychody" : "Koszty"}
-                  </StatusBadge>
+                  <span className="text-muted-foreground">Wykryto:</span>
+                  {preview.mode === "bank" ? (
+                    <StatusBadge tone="blue">Wyciąg mBank</StatusBadge>
+                  ) : (
+                    <StatusBadge tone={preview.sheet.kind === "PRZYCHOD" ? "green" : "red"}>
+                      Arkusz — {preview.sheet.kind === "PRZYCHOD" ? "Przychody" : "Koszty"}
+                    </StatusBadge>
+                  )}
                   <span className="tabular-nums">
-                    {parsedCount}{" "}
-                    {pluralPl(parsedCount, "operacja", "operacje", "operacji")}
+                    {previewCount} {pluralPl(previewCount, "operacja", "operacje", "operacji")}
                   </span>
                 </div>
 
-                {parsed.errors.length > 0 && (
-                  <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
-                    <p className="text-sm font-medium">
-                      {parsed.errors.length}{" "}
-                      {pluralPl(parsed.errors.length, "błąd", "błędy", "błędów")} — import zablokowany
-                    </p>
-                    <IssueList issues={parsed.errors} />
-                    <p className="mt-1.5 text-xs">
-                      Popraw błędne wiersze w źródle i wybierz plik ponownie.
-                    </p>
+                {bankSkipped.length > 0 && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                    Pominięto {bankSkipped.length}{" "}
+                    {pluralPl(bankSkipped.length, "wiersz", "wiersze", "wierszy")} nietransakcyjnych
+                    (nagłówki/podsumowania).
                   </div>
                 )}
 
-                {parsed.errors.length === 0 && parsedCount === 0 && (
-                  <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
-                    Plik nie zawiera żadnych wierszy z danymi.
+                {sheetErrors.length > 0 && (
+                  <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+                    <p className="text-sm font-medium">
+                      {sheetErrors.length}{" "}
+                      {pluralPl(sheetErrors.length, "błąd", "błędy", "błędów")} — import zablokowany
+                    </p>
+                    <IssueList issues={sheetErrors} />
                   </div>
                 )}
               </div>
@@ -357,12 +484,8 @@ export function RwImportDialog({
         {step === "review" && (
           <div className="flex min-h-0 flex-1 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <StatusBadge tone={kind === "PRZYCHOD" ? "green" : "red"}>
-                {kind === "PRZYCHOD" ? "Przychody" : "Koszty"}
-              </StatusBadge>
               <span className="tabular-nums text-muted-foreground">
-                {rows.length}{" "}
-                {pluralPl(rows.length, "operacja", "operacje", "operacji")}
+                {rows.length} {pluralPl(rows.length, "operacja", "operacje", "operacji")}
               </span>
               {stats.toCheck > 0 && (
                 <StatusBadge tone="amber">
@@ -370,9 +493,7 @@ export function RwImportDialog({
                 </StatusBadge>
               )}
               {stats.missing > 0 && (
-                <StatusBadge tone="red">
-                  {stats.missing} bez kategorii
-                </StatusBadge>
+                <StatusBadge tone="red">{stats.missing} bez kategorii</StatusBadge>
               )}
               <span className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <Wand2 className="size-3" /> {stats.auto} przypisano automatycznie
@@ -383,10 +504,18 @@ export function RwImportDialog({
               <table className="w-full text-sm">
                 <thead className="sticky top-0 z-10 bg-muted/95 text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur">
                   <tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left">
-                    <th className="w-10">Mc</th>
+                    <th className="w-9">Mc</th>
                     <th>Operacja</th>
-                    <th className="w-24 text-right">Kwota</th>
-                    <th className="w-64">Kategoria</th>
+                    {isBank ? (
+                      <>
+                        <th className="w-24 text-right">Brutto</th>
+                        <th className="w-20">VAT</th>
+                        <th className="w-24 text-right">Netto</th>
+                      </>
+                    ) : (
+                      <th className="w-24 text-right">Kwota</th>
+                    )}
+                    <th className="w-60">Kategoria</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -406,40 +535,78 @@ export function RwImportDialog({
                           {RW_MONTH_SHORT[r.month - 1]}
                         </td>
                         <td className="px-2 py-1.5">
-                          <div className="max-w-[280px] truncate font-medium">
-                            {r.contractor || r.description || "—"}
+                          <div className="flex items-center gap-1.5">
+                            {isBank && (
+                              <span
+                                className={cn(
+                                  "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium",
+                                  r.kind === "PRZYCHOD"
+                                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
+                                    : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400"
+                                )}
+                              >
+                                {r.kind === "PRZYCHOD" ? "P" : "K"}
+                              </span>
+                            )}
+                            <span className="max-w-[260px] truncate font-medium">
+                              {r.description || r.contractor || "—"}
+                            </span>
                           </div>
-                          {r.contractor && r.description && (
-                            <div className="max-w-[280px] truncate text-xs text-muted-foreground">
-                              {r.description}
-                            </div>
-                          )}
                         </td>
-                        <td
-                          className={cn(
-                            "px-2 py-1.5 text-right tabular-nums",
-                            r.amountGr < 0 && "text-red-600 dark:text-red-400"
-                          )}
-                        >
-                          {formatZl(r.amountGr)}
-                        </td>
-                        <td className="px-2 py-1.5">
-                          <Select
-                            value={r.category}
-                            onValueChange={(v) => setRowCategory(i, v)}
+                        {isBank ? (
+                          <>
+                            <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                              {formatZl(r.grossAmountGr ?? 0)}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <Select
+                                value={String(r.vatRate)}
+                                onValueChange={(v) => setRowVat(i, Number(v) as VatRate)}
+                              >
+                                <SelectTrigger size="sm" className="w-16">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {VAT_RATES.map((v) => (
+                                    <SelectItem key={v} value={String(v)}>
+                                      {v}%
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </td>
+                            <td
+                              className={cn(
+                                "px-2 py-1.5 text-right tabular-nums font-medium",
+                                r.amountGr < 0 && "text-red-600 dark:text-red-400"
+                              )}
+                            >
+                              {formatZl(r.amountGr)}
+                            </td>
+                          </>
+                        ) : (
+                          <td
+                            className={cn(
+                              "px-2 py-1.5 text-right tabular-nums",
+                              r.amountGr < 0 && "text-red-600 dark:text-red-400"
+                            )}
                           >
+                            {formatZl(r.amountGr)}
+                          </td>
+                        )}
+                        <td className="px-2 py-1.5">
+                          <Select value={r.category} onValueChange={(v) => setRowCategory(i, v)}>
                             <SelectTrigger
                               size="sm"
                               className={cn(
                                 "w-full",
-                                r.category === "" &&
-                                  "border-red-400 text-muted-foreground"
+                                r.category === "" && "border-red-400 text-muted-foreground"
                               )}
                             >
                               <SelectValue placeholder="wybierz kategorię…" />
                             </SelectTrigger>
                             <SelectContent>
-                              {groups.map((g) => (
+                              {groupsByKind[r.kind].map((g) => (
                                 <SelectGroup key={g.label}>
                                   <SelectLabel>{g.label}</SelectLabel>
                                   {g.items.map((name) => (
@@ -460,6 +627,23 @@ export function RwImportDialog({
             </div>
 
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              {isBank && (
+                <>
+                  <span className="tabular-nums">
+                    Przychody netto:{" "}
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400">
+                      {formatZl(stats.revenueGr)}
+                    </span>
+                  </span>
+                  <span className="tabular-nums">
+                    Koszty netto:{" "}
+                    <span className="font-medium text-red-600 dark:text-red-400">
+                      {formatZl(stats.costGr)}
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground/60">·</span>
+                </>
+              )}
               {monthSums.map(([month, sumGr]) => (
                 <span key={month} className="tabular-nums">
                   {RW_MONTH_LABELS[month - 1]}:{" "}
@@ -480,29 +664,20 @@ export function RwImportDialog({
         <DialogFooter>
           {step === "select" ? (
             <>
-              <Button
-                variant="outline"
-                onClick={() => handleOpenChange(false)}
-              >
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 Anuluj
               </Button>
               <Button onClick={proceedToReview} disabled={!canProceed}>
-                Dalej: sprawdź kategorie
+                Dalej: sprawdź operacje
               </Button>
             </>
           ) : (
             <>
-              <Button
-                variant="outline"
-                onClick={() => setStep("select")}
-                disabled={pending}
-              >
+              <Button variant="outline" onClick={() => setStep("select")} disabled={pending}>
                 <ArrowLeft data-icon="inline-start" /> Wstecz
               </Button>
               <Button onClick={handleCommit} disabled={pending || stats.missing > 0}>
-                {pending
-                  ? "Zapisywanie…"
-                  : `Zatwierdź import (${rows.length})`}
+                {pending ? "Zapisywanie…" : `Zatwierdź import (${rows.length})`}
               </Button>
             </>
           )}

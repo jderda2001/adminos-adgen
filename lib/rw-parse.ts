@@ -10,7 +10,7 @@ import { findRwCategory, type RwKind } from "./rw-types";
 
 // ── CSV (RFC 4180: cudzysłowy, przecinki i nowe linie w polach) ──────
 
-export function parseCsv(text: string): string[][] {
+export function parseCsv(text: string, delimiter = ","): string[][] {
   // usuń BOM
   const input = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   const rows: string[][] = [];
@@ -33,7 +33,7 @@ export function parseCsv(text: string): string[][] {
       }
     } else if (ch === '"') {
       inQuotes = true;
-    } else if (ch === ",") {
+    } else if (ch === delimiter) {
       row.push(field);
       field = "";
     } else if (ch === "\n" || ch === "\r") {

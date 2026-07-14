@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { RW_MANUAL_METRICS, findRwCategory, type RwKind } from "@/lib/rw-types";
+import { netFromGrossGr, type VatRate } from "@/lib/bank-parse";
 
 const RW_PATH = "/rachunek-wynikow";
 
@@ -127,6 +128,136 @@ export async function commitRwReviewAction(input: {
     ok: true,
     batchId: batch.id,
     kind,
+    imported: data.length,
+    months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
+  };
+}
+
+/** Wiersz przeglądu z importu wyciągu bankowego (kwota BRUTTO + stawka VAT) */
+export interface RwBankReviewRow {
+  kind: string; // PRZYCHOD | KOSZT (z znaku kwoty, edytowalny)
+  month: number; // 1–12
+  category: string; // kanoniczna kategoria
+  grossAmountGr: number; // BRUTTO ze znakiem (z wyciągu)
+  vatRate: number; // 0 | 8 | 23
+  description: string | null;
+  note: string | null;
+  dateISO: string | null;
+}
+
+const VAT_RATES = new Set([0, 8, 23]);
+
+/**
+ * Zatwierdza operacje z wyciągu bankowego (mBank) PO przeglądzie. Jeden plik
+ * ma OBA kierunki — kind jest per-wiersz. Kwota NETTO liczona jest tutaj
+ * serwerowo z brutto i stawki VAT (autorytatywnie, nie z klienta): znak netto
+ * musi zgadzać się z kierunkiem. Zapis jako jedna partia (kind = „BANK").
+ */
+export async function commitRwBankReviewAction(input: {
+  year: number;
+  filename: string;
+  rows: RwBankReviewRow[];
+}): Promise<RwImportResult> {
+  await requireAdmin();
+
+  const { year, filename, rows } = input;
+  if (!Number.isInteger(year) || year < 2020 || year > 2100) {
+    return { ok: false, error: "Nieprawidłowy rok importu" };
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { ok: false, error: "Brak operacji do zatwierdzenia" };
+  }
+  if (rows.length > 5000) {
+    return { ok: false, error: "Zbyt wiele operacji naraz (limit 5000)" };
+  }
+
+  const clip = (v: unknown, max: number): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t.slice(0, max);
+  };
+
+  const data: {
+    year: number;
+    month: number;
+    kind: string;
+    category: string;
+    amountGr: number;
+    description: string | null;
+    contractor: string | null;
+    bank: string | null;
+    note: string | null;
+    source: string;
+    batchId: string;
+  }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const nr = i + 1;
+    if (r.kind !== "PRZYCHOD" && r.kind !== "KOSZT") {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy kierunek` };
+    }
+    if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
+    }
+    if (!Number.isInteger(r.grossAmountGr) || r.grossAmountGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota brutto` };
+    }
+    if (!VAT_RATES.has(r.vatRate)) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa stawka VAT` };
+    }
+    if (!findRwCategory(r.kind as RwKind, r.category)) {
+      return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
+    }
+    // NETTO liczone serwerowo (autorytatywnie) z brutto + VAT
+    const amountGr = netFromGrossGr(r.grossAmountGr, r.vatRate as VatRate);
+    // znak netto musi odpowiadać kierunkowi (przychód +, koszt −)
+    if (r.kind === "PRZYCHOD" && amountGr <= 0) {
+      return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
+    }
+    if (r.kind === "KOSZT" && amountGr >= 0) {
+      return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
+    }
+    // ślad pochodzenia w uwadze: brutto + stawka VAT + data operacji
+    const vatNote =
+      `brutto ${(r.grossAmountGr / 100).toFixed(2)} zł · VAT ${r.vatRate}%` +
+      (r.dateISO ? ` · ${r.dateISO}` : "");
+    const userNote = clip(r.note, 120);
+    data.push({
+      year,
+      month: r.month,
+      kind: r.kind,
+      category: r.category,
+      amountGr,
+      description: clip(r.description, 300),
+      contractor: null,
+      bank: "mBank",
+      note: userNote ? `${userNote} · ${vatNote}` : vatNote,
+      source: "IMPORT_MBANK",
+      batchId: "",
+    });
+  }
+
+  const batch = await db.$transaction(async (tx) => {
+    const created = await tx.rwImportBatch.create({
+      data: {
+        filename: (filename || "wyciąg mBank.csv").slice(0, 200),
+        kind: "BANK",
+        year,
+        rowCount: data.length,
+      },
+    });
+    await tx.rwEntry.createMany({
+      data: data.map((d) => ({ ...d, batchId: created.id })),
+    });
+    return created;
+  });
+
+  revalidatePath(RW_PATH);
+  return {
+    ok: true,
+    batchId: batch.id,
+    kind: "BANK",
     imported: data.length,
     months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
   };
