@@ -17,6 +17,8 @@ export interface RwImportSummary {
   kind: string;
   imported: number;
   months: number[];
+  /** lata, do których trafiły operacje (wyciąg może być za poprzedni rok) */
+  years: number[];
 }
 export type RwImportResult = RwImportSummary | { ok: false; error: string };
 
@@ -131,6 +133,7 @@ export async function commitRwReviewAction(input: {
     kind,
     imported: data.length,
     months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
+    years: [year],
   };
 }
 
@@ -224,12 +227,22 @@ export async function commitRwBankReviewAction(input: {
     if (!findRwCategory(r.kind as RwKind, r.category)) {
       return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
     }
+    // ROK z daty operacji (wyciąg może być za poprzednie miesiące/lata);
+    // gdy brak daty (np. ręczny podział) — rok wybrany na stronie
+    let rowYear = year;
+    if (typeof r.dateISO === "string") {
+      const m = r.dateISO.match(/^(\d{4})-/);
+      if (m) {
+        const y = parseInt(m[1], 10);
+        if (y >= 2020 && y <= 2100) rowYear = y;
+      }
+    }
     // ślad pochodzenia w uwadze: data operacji z wyciągu
     const userNote = clip(r.note, 160);
     const dateNote = r.dateISO ? `wyciąg ${r.dateISO}` : null;
     const note = [userNote, dateNote].filter(Boolean).join(" · ") || null;
     data.push({
-      year,
+      year: rowYear,
       month: r.month,
       kind: r.kind,
       category: r.category,
@@ -243,12 +256,17 @@ export async function commitRwBankReviewAction(input: {
     });
   }
 
+  // partia filowana pod rok dominujący wśród wierszy (najczęstszy)
+  const yearCounts = new Map<number, number>();
+  for (const d of data) yearCounts.set(d.year, (yearCounts.get(d.year) ?? 0) + 1);
+  const batchYear = [...yearCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? year;
+
   const batch = await db.$transaction(async (tx) => {
     const created = await tx.rwImportBatch.create({
       data: {
         filename: (filename || "wyciąg mBank.csv").slice(0, 200),
         kind: "BANK",
-        year,
+        year: batchYear,
         rowCount: data.length,
         accountsJson: accounts.length > 0 ? JSON.stringify(accounts) : null,
       },
@@ -266,6 +284,156 @@ export async function commitRwBankReviewAction(input: {
     kind: "BANK",
     imported: data.length,
     months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
+    years: [...new Set(data.map((d) => d.year))].sort((a, b) => a - b),
+  };
+}
+
+// ── Edycja zaimportowanej partii ─────────────────────────────────────
+
+/** Wiersz partii do edycji (odczyt z bazy → klient) */
+export interface RwBatchEditRow {
+  year: number;
+  month: number;
+  kind: string; // PRZYCHOD | KOSZT
+  category: string;
+  amountGr: number; // ze znakiem (przychód +, koszt −)
+  description: string | null;
+  contractor: string | null;
+  bank: string | null;
+  note: string | null;
+}
+
+export type RwBatchEditData =
+  | { ok: true; batch: { id: string; kind: string; filename: string }; rows: RwBatchEditRow[] }
+  | { ok: false; error: string };
+
+/** Wczytuje partię i jej wpisy do edycji w przeglądzie. */
+export async function getRwBatchForEditAction(batchId: string): Promise<RwBatchEditData> {
+  await requireAdmin();
+  const batch = await db.rwImportBatch.findUnique({ where: { id: batchId } });
+  if (!batch) return { ok: false, error: "Import nie istnieje" };
+  const entries = await db.rwEntry.findMany({
+    where: { batchId },
+    orderBy: [{ month: "asc" }, { id: "asc" }],
+    select: {
+      year: true,
+      month: true,
+      kind: true,
+      category: true,
+      amountGr: true,
+      description: true,
+      contractor: true,
+      bank: true,
+      note: true,
+    },
+  });
+  return {
+    ok: true,
+    batch: { id: batch.id, kind: batch.kind, filename: batch.filename },
+    rows: entries,
+  };
+}
+
+/**
+ * Zapisuje edycję partii: podmienia WSZYSTKIE jej wpisy (usuń + wstaw) w jednej
+ * transakcji, zachowując id/nazwę partii. Rok i miesiąc wpisów są zachowane
+ * (edycja nie zmienia dat) — zmienia się kategoria/kwota, można też usunąć
+ * wiersze. Pusta lista = cofnięcie całej partii (usunięcie partii i wpisów).
+ */
+export async function updateRwBatchAction(input: {
+  batchId: string;
+  rows: RwBatchEditRow[];
+}): Promise<RwImportResult> {
+  await requireAdmin();
+  const { batchId, rows } = input;
+  const batch = await db.rwImportBatch.findUnique({ where: { id: batchId } });
+  if (!batch) return { ok: false, error: "Import nie istnieje" };
+  if (!Array.isArray(rows)) return { ok: false, error: "Brak danych" };
+  if (rows.length > 5000) {
+    return { ok: false, error: "Zbyt wiele operacji naraz (limit 5000)" };
+  }
+
+  const clip = (v: unknown, max: number): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    return t === "" ? null : t.slice(0, max);
+  };
+  const source = batch.kind === "BANK" ? "IMPORT_MBANK" : "IMPORT";
+
+  const data: {
+    year: number;
+    month: number;
+    kind: string;
+    category: string;
+    amountGr: number;
+    description: string | null;
+    contractor: string | null;
+    bank: string | null;
+    note: string | null;
+    source: string;
+    batchId: string;
+  }[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const nr = i + 1;
+    if (r.kind !== "PRZYCHOD" && r.kind !== "KOSZT") {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy kierunek` };
+    }
+    if (!Number.isInteger(r.year) || r.year < 2020 || r.year > 2100) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy rok` };
+    }
+    if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowy miesiąc` };
+    }
+    if (!Number.isInteger(r.amountGr) || r.amountGr === 0) {
+      return { ok: false, error: `Operacja ${nr}: nieprawidłowa kwota` };
+    }
+    if (r.kind === "PRZYCHOD" && r.amountGr <= 0) {
+      return { ok: false, error: `Operacja ${nr}: przychód musi być dodatni` };
+    }
+    if (r.kind === "KOSZT" && r.amountGr >= 0) {
+      return { ok: false, error: `Operacja ${nr}: koszt musi być ujemny` };
+    }
+    if (!findRwCategory(r.kind as RwKind, r.category)) {
+      return { ok: false, error: `Operacja ${nr}: nieznana kategoria „${r.category}”` };
+    }
+    data.push({
+      year: r.year,
+      month: r.month,
+      kind: r.kind,
+      category: r.category,
+      amountGr: r.amountGr,
+      description: clip(r.description, 300),
+      contractor: clip(r.contractor, 120),
+      bank: clip(r.bank, 40),
+      note: clip(r.note, 300),
+      source,
+      batchId,
+    });
+  }
+
+  await db.$transaction(async (tx) => {
+    await tx.rwEntry.deleteMany({ where: { batchId } });
+    if (data.length === 0) {
+      await tx.rwImportBatch.delete({ where: { id: batchId } });
+      return;
+    }
+    await tx.rwEntry.createMany({ data });
+    await tx.rwImportBatch.update({
+      where: { id: batchId },
+      data: { rowCount: data.length },
+    });
+  });
+
+  revalidatePath(RW_PATH);
+  return {
+    ok: true,
+    batchId,
+    kind: batch.kind,
+    imported: data.length,
+    months: [...new Set(data.map((d) => d.month))].sort((a, b) => a - b),
+    years: [...new Set(data.map((d) => d.year))].sort((a, b) => a - b),
   };
 }
 

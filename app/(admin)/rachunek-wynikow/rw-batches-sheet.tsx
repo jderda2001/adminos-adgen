@@ -6,7 +6,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { History, Undo2 } from "lucide-react";
+import { History, Undo2, Pencil } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,13 +23,20 @@ import { DetailSheet } from "@/components/detail-sheet";
 import { StatusBadge } from "@/components/status-badge";
 import { formatDate, pluralPl } from "@/lib/format";
 import { deleteRwBatchAction } from "./actions";
+import { RwBatchEditDialog } from "./rw-batch-edit-dialog";
 import type { RwBatchRow } from "./rw-view";
 
 function kindLabel(kind: string): string {
   return kind === "PRZYCHOD" ? "Przychody" : kind === "KOSZT" ? "Koszty" : kind;
 }
 
-function BatchItem({ batch }: { batch: RwBatchRow }) {
+function BatchItem({
+  batch,
+  onEdit,
+}: {
+  batch: RwBatchRow;
+  onEdit: (batch: RwBatchRow) => void;
+}) {
   const [pending, startTransition] = useTransition();
   const created = new Date(batch.createdAt);
   const time = created.toLocaleTimeString("pl-PL", {
@@ -65,7 +72,10 @@ function BatchItem({ batch }: { batch: RwBatchRow }) {
           {kindLabel(batch.kind)}
         </StatusBadge>
       </div>
-      <div className="mt-2 flex justify-end">
+      <div className="mt-2 flex justify-end gap-1">
+        <Button variant="ghost" size="xs" disabled={pending} onClick={() => onEdit(batch)}>
+          <Pencil data-icon="inline-start" /> Edytuj
+        </Button>
         <AlertDialog>
           <AlertDialogTrigger asChild>
             <Button
@@ -108,6 +118,13 @@ function BatchItem({ batch }: { batch: RwBatchRow }) {
 
 export function RwBatchesSheet({ batches }: { batches: RwBatchRow[] }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<RwBatchRow | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+
+  function handleEdit(batch: RwBatchRow) {
+    setEditing(batch);
+    setEditOpen(true);
+  }
 
   return (
     <>
@@ -119,7 +136,7 @@ export function RwBatchesSheet({ batches }: { batches: RwBatchRow[] }) {
         open={open}
         onOpenChange={setOpen}
         title="Historia importów"
-        description="Partie zaimportowane z plików CSV. Cofnięcie importu usuwa wszystkie wiersze danej partii."
+        description="Partie zaimportowane z plików CSV. Możesz edytować partię (poprawić kategorie i kwoty) albo cofnąć import (usuwa wszystkie jej wiersze)."
       >
         {batches.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -128,11 +145,18 @@ export function RwBatchesSheet({ batches }: { batches: RwBatchRow[] }) {
         ) : (
           <div className="space-y-3">
             {batches.map((batch) => (
-              <BatchItem key={batch.id} batch={batch} />
+              <BatchItem key={batch.id} batch={batch} onEdit={handleEdit} />
             ))}
           </div>
         )}
       </DetailSheet>
+
+      <RwBatchEditDialog
+        batchId={editOpen ? editing?.id ?? null : null}
+        filename={editing?.filename ?? ""}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+      />
     </>
   );
 }

@@ -627,10 +627,19 @@ export function RwImportDialog({
             });
       if (result.ok) {
         const monthNames = result.months.map((m) => RW_MONTH_LABELS[m - 1]).join(", ");
+        // gdy operacje trafiły do innego roku niż oglądany — dopisz rok(i)
+        const years = result.years ?? [];
+        const otherYear = years.length > 1 || (years.length === 1 && years[0] !== year);
+        const yearLabel = otherYear ? ` ${years.join(", ")}` : "";
         toast.success(
           `Zatwierdzono ${result.imported} ${pluralPl(result.imported, "operację", "operacje", "operacji")}` +
-            (monthNames ? ` — ${monthNames}` : "")
+            (monthNames ? ` — ${monthNames}${yearLabel}` : "")
         );
+        if (otherYear) {
+          toast.info(
+            `Dane trafiły do roku ${years.join(", ")} — przełącz rok u góry, żeby je zobaczyć.`
+          );
+        }
         setOpen(false);
         reset();
       } else {
@@ -655,6 +664,9 @@ export function RwImportDialog({
           "flex max-h-[90vh] flex-col",
           step === "review" ? "sm:max-w-3xl" : "sm:max-w-lg"
         )}
+        // klik poza treścią (tło, dropdown kategorii w portalu) NIE zamyka —
+        // zamykamy tylko przez X / Anuluj, żeby nie gubić pracy w przeglądzie
+        onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
           <DialogTitle>
