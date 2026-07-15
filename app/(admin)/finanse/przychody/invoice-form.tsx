@@ -26,6 +26,9 @@ import {
 } from "@/components/ui/select";
 import {
   DEFAULT_OFFER_TAGS,
+  LEAD_CATEGORIES,
+  LEAD_TAG_PREFIX,
+  LEADS_OFFER_TAG,
   VAT_RATES,
   VAT_RATE_FRACTIONS,
   VAT_RATE_LABELS,
@@ -102,7 +105,28 @@ export function InvoiceFormDialog({
   }
 
   function removeTag(tag: string) {
-    setTags((prev) => prev.filter((t) => t !== tag));
+    setTags((prev) => {
+      const next = prev.filter((t) => t !== tag);
+      // zdjęcie „PAKIETY LEADÓW" usuwa też przypiętą branżę leadów
+      if (tag.toLowerCase() === LEADS_OFFER_TAG.toLowerCase()) {
+        return next.filter((t) => !t.startsWith(LEAD_TAG_PREFIX));
+      }
+      return next;
+    });
+  }
+
+  // „Pakiety leadów": czy tag wybrany + jaka branża (z tagu „Leady: …")
+  const hasLeads = tags.some(
+    (t) => t.toLowerCase() === LEADS_OFFER_TAG.toLowerCase()
+  );
+  const leadCategory =
+    tags.find((t) => t.startsWith(LEAD_TAG_PREFIX))?.slice(LEAD_TAG_PREFIX.length) ??
+    "";
+  function setLeadCategory(category: string) {
+    setTags((prev) => [
+      ...prev.filter((t) => !t.startsWith(LEAD_TAG_PREFIX)),
+      ...(category ? [`${LEAD_TAG_PREFIX}${category}`] : []),
+    ]);
   }
 
   // Podgląd VAT/brutto na żywo (serwer liczy ostatecznie przez computeVatFromNet)
@@ -281,25 +305,28 @@ export function InvoiceFormDialog({
           {/* ── Oferta / tagi ─────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="offerTagInput">Oferta / tagi</Label>
-            {tags.length > 0 && (
+            {tags.some((t) => !t.startsWith(LEAD_TAG_PREFIX)) && (
               <div className="flex flex-wrap gap-1.5">
-                {tags.map((tag) => (
-                  <Badge
-                    key={tag}
-                    variant="secondary"
-                    className="gap-1 font-normal"
-                  >
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="text-muted-foreground hover:text-foreground"
-                      aria-label={`Usuń tag ${tag}`}
+                {/* tag „Leady: …" jest niewidoczny — zarządza nim dropdown poniżej */}
+                {tags
+                  .filter((t) => !t.startsWith(LEAD_TAG_PREFIX))
+                  .map((tag) => (
+                    <Badge
+                      key={tag}
+                      variant="secondary"
+                      className="gap-1 font-normal"
                     >
-                      <X className="size-3" />
-                    </button>
-                  </Badge>
-                ))}
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeTag(tag)}
+                        className="text-muted-foreground hover:text-foreground"
+                        aria-label={`Usuń tag ${tag}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  ))}
               </div>
             )}
             <Input
@@ -335,6 +362,25 @@ export function InvoiceFormDialog({
                 </button>
               ))}
             </div>
+
+            {/* „Leady na" — widoczne tylko gdy wybrany tag PAKIETY LEADÓW */}
+            {hasLeads && (
+              <div className="space-y-1.5 rounded-md border bg-muted/30 p-2.5">
+                <Label htmlFor="leadCategory">Leady na</Label>
+                <Select value={leadCategory} onValueChange={setLeadCategory}>
+                  <SelectTrigger id="leadCategory" className="w-full">
+                    <SelectValue placeholder="Wybierz kategorię leadów" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {LEAD_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">

@@ -102,3 +102,24 @@ export const DEFAULT_OFFER_TAGS = [
   "PAKIETY LEADÓW",
   "INNE",
 ] as const;
+
+// Tag oferty „pakiety leadów" — po jego wybraniu w formularzu przychodu
+// pojawia się dropdown „Leady na" z branżami poniżej.
+export const LEADS_OFFER_TAG = "PAKIETY LEADÓW";
+
+// Branże/kategorie leadów (dropdown „Leady na"). Wybór zapisywany jako tag
+// oferty z prefiksem LEAD_TAG_PREFIX (np. „Leady: SKD") — bez zmian w schemacie.
+export const LEAD_CATEGORIES = [
+  "SKD",
+  "Służebności przesyłu",
+  "Kredyty zagraniczne",
+  "Kredyty firmowe",
+  "Restrukturyzacje",
+  "OZE",
+  "Księgowość (JDG na sp zoo)",
+  "Księgowość Spółki",
+  "Księgowość KSEF",
+  "Automotive",
+] as const;
+
+export const LEAD_TAG_PREFIX = "Leady: ";
