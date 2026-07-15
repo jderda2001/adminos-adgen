@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { generateRecurringCosts } from "@/lib/reports";
+import { PageHeader } from "@/components/page-header";
 import { buildCostFilters, type CostFilterParams } from "./filters";
 import { CostsTable, type CostRow } from "./costs-table";
 import { PendingCosts, type PendingCostRow } from "./pending-costs";
@@ -111,15 +112,21 @@ export default async function CostsPage({
   const supplierNames = suppliers.map((s) => s.supplierName);
 
   return (
-    <div className="space-y-4">
-      {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
-      <CostsTable
-        costs={rows}
-        categories={categoryOptions}
-        clients={clients}
-        supplierNames={supplierNames}
-        templates={templateRows}
+    <>
+      <PageHeader
+        title="Koszty"
+        description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
       />
-    </div>
+      <div className="space-y-4">
+        {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
+        <CostsTable
+          costs={rows}
+          categories={categoryOptions}
+          clients={clients}
+          supplierNames={supplierNames}
+          templates={templateRows}
+        />
+      </div>
+    </>
   );
 }

@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   LineChart,
-  Wallet,
+  Banknote,
+  Receipt,
   CreditCard,
   TrendingUp,
   Building2,
@@ -35,7 +36,8 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
   {
     label: "Finanse",
     items: [
-      { href: "/finanse/przychody", label: "Przychody i koszty", icon: Wallet, match: "/finanse" },
+      { href: "/finanse/przychody", label: "Przychody", icon: Banknote },
+      { href: "/finanse/koszty", label: "Koszty", icon: Receipt },
       { href: "/platnosci", label: "Płatności", icon: CreditCard },
       { href: "/rentownosc", label: "Rentowność", icon: TrendingUp },
     ],
