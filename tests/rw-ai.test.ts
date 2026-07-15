@@ -12,22 +12,26 @@ import {
 describe("buildTaxonomyPrompt", () => {
   const prompt = buildTaxonomyPrompt();
 
-  it("zawiera kategorie obu rodzajów i zasady metodologii", () => {
-    expect(prompt).toContain("Abonament marketingowy");
-    expect(prompt).toContain("Delivery - wynagrodzenia");
-    expect(prompt).toContain("Środki przelane na oszczędności");
+  it("zawiera aktywne kategorie obu rodzajów i zasady metodologii", () => {
+    expect(prompt).toContain("Abonament marketingowy"); // przychód (aktywny)
+    expect(prompt).toContain("Wypłaty | Zespół"); // koszt (nowa taksonomia)
+    expect(prompt).toContain("Oszczędności"); // koszt odłożony (nowa taksonomia)
+    // stare, zdeprecjonowane nazwy NIE trafiają do promptu
+    expect(prompt).not.toContain("Delivery - wynagrodzenia");
     expect(prompt).toContain("Zwroty");
   });
 });
 
 describe("buildOutputSchema", () => {
-  it("enum kategorii bez duplikatów (Inne występuje w obu rodzajach)", () => {
+  it("enum tylko z aktywnych kategorii, bez duplikatów i bez zdeprecjonowanych", () => {
     const schema = buildOutputSchema() as {
       properties: { items: { items: { properties: { category: { enum: string[] } } } } };
     };
     const names = schema.properties.items.items.properties.category.enum;
-    expect(names).toContain("Inne");
+    expect(names).toContain("Inne"); // aktywna kategoria przychodu
     expect(names).toContain("CIT");
+    expect(names).toContain("Wypłaty | Zespół"); // nowa taksonomia
+    expect(names).not.toContain("Marketing - budżety"); // zdeprecjonowana
     expect(new Set(names).size).toBe(names.length); // brak duplikatów
   });
 });
@@ -38,20 +42,28 @@ describe("validateAiSuggestions", () => {
     { index: 3, kind: "PRZYCHOD", description: "ABONAMENT", amountGr: 500000 },
   ];
 
-  it("przyjmuje poprawne propozycje z kanoniczną nazwą", () => {
+  it("przyjmuje poprawne propozycje z aktywną nazwą", () => {
     const out = validateAiSuggestions(
       {
         items: [
-          { i: 0, category: "Marketing - budżety", confidence: "high" },
+          { i: 0, category: "Budżet reklamowy", confidence: "high" },
           { i: 3, category: "Abonament marketingowy", confidence: "medium" },
         ],
       },
       rows
     );
     expect(out).toEqual([
-      { index: 0, category: "Marketing - budżety", confidence: "high" },
+      { index: 0, category: "Budżet reklamowy", confidence: "high" },
       { index: 3, category: "Abonament marketingowy", confidence: "medium" },
     ]);
+  });
+
+  it("mapuje starą (zdeprecjonowaną) nazwę na aktywną", () => {
+    const out = validateAiSuggestions(
+      { items: [{ i: 0, category: "Marketing - budżety", confidence: "high" }] },
+      rows
+    );
+    expect(out).toEqual([{ index: 0, category: "Budżet reklamowy", confidence: "high" }]);
   });
 
   it("odrzuca kategorię złego RODZAJU (CIT to koszt, nie przychód)", () => {
@@ -66,28 +78,28 @@ describe("validateAiSuggestions", () => {
     const out = validateAiSuggestions(
       {
         items: [
-          { i: 99, category: "Inne", confidence: "high" }, // nieznany index
+          { i: 99, category: "Abonamenty", confidence: "high" }, // nieznany index
           { i: 0, category: "Wymyślona kategoria", confidence: "high" }, // spoza taksonomii
-          { i: 0, category: "Inne", confidence: "banana" }, // zły confidence
+          { i: 0, category: "Abonamenty", confidence: "banana" }, // zły confidence
         ],
       },
       rows
     );
-    expect(out).toEqual([{ index: 0, category: "Inne", confidence: "medium" }]);
+    expect(out).toEqual([{ index: 0, category: "Abonamenty", confidence: "medium" }]);
   });
 
   it("duplikat indexu — pierwszy wygrywa; śmieciowe wejście → []", () => {
     const out = validateAiSuggestions(
       {
         items: [
-          { i: 0, category: "Marketing - budżety", confidence: "high" },
-          { i: 0, category: "Inne", confidence: "low" },
+          { i: 0, category: "Budżet reklamowy", confidence: "high" },
+          { i: 0, category: "Abonamenty", confidence: "low" },
         ],
       },
       rows
     );
     expect(out).toHaveLength(1);
-    expect(out[0].category).toBe("Marketing - budżety");
+    expect(out[0].category).toBe("Budżet reklamowy");
 
     expect(validateAiSuggestions(null, rows)).toEqual([]);
     expect(validateAiSuggestions({ items: "nie-tablica" }, rows)).toEqual([]);

@@ -8,18 +8,22 @@ import { suggestCategory, type PersonRule } from "@/lib/rw-categorize";
 
 describe("suggestCategory — reguły ogólne (koszty, bez PII)", () => {
   const cases: [string, string, string][] = [
-    // [kontrahent, opis, oczekiwana kategoria]
-    ["Meta Ads", "PAYPRO META ADS", "Marketing - budżety"],
-    ["ClickUp", "CLICKUP ZAKUP", "Administracja - abonamenty"],
-    ["Google", "Google Workspace_adgen", "Administracja - abonamenty"],
-    ["Anthropic", "OPŁATA CLAUDE", "Administracja - abonamenty"],
-    ["T-mobile", "OPŁATA FAKTURY", "Administracja - abonamenty"],
-    ["Biuro Rachunkowe XYZ", "USŁUGI KSIĘGOWE", "Obsługa księgowa"],
-    ["Wynajem Sp. z o.o.", "CZYNSZ BIURO", "Biuro - czynsz"],
+    // [kontrahent, opis, oczekiwana kategoria] — nowa taksonomia (14 kategorii)
+    ["Meta Ads", "PAYPRO META ADS", "Budżet reklamowy"],
+    ["ClickUp", "CLICKUP ZAKUP", "Abonamenty"],
+    ["Google", "Google Workspace_adgen", "Abonamenty"],
+    ["Anthropic", "OPŁATA CLAUDE", "Abonamenty"],
+    ["T-mobile", "OPŁATA FAKTURY", "Abonamenty"],
+    ["Instantly", "INSTANTLY", "Abonamenty"],
+    ["Biuro Rachunkowe XYZ", "USŁUGI KSIĘGOWE", "Pozostałe wydatki operacyjne"],
+    ["Wynajem Sp. z o.o.", "CZYNSZ BIURO", "Pozostałe wydatki operacyjne"],
     ["Urząd Skarbowy", "CIT-8 CENTRUM ROZLICZENIOWE", "CIT"],
-    ["adGen", "OSZCZĘDNOŚCI - PRZELEW", "Środki przelane na oszczędności"],
-    ["Instantly", "INSTANTLY", "Sprzedaż - zewnętrzny koszt"],
-    ["Jakiś podwykonawca", "PODWYKONAWSTWO", "Delivery - podwykonawcy"],
+    ["Urząd Skarbowy", "PODATEK VAT-7", "VAT"],
+    ["Urząd Skarbowy", "PIT-4 ZALICZKA", "PIT"],
+    ["adGen", "OSZCZĘDNOŚCI - PRZELEW", "Oszczędności"],
+    ["Orlen", "PALIWO STACJA", "Samochody"],
+    ["Restauracja Nocna", "OBIAD RESTAURACJA", "Networking"],
+    ["Jakiś podwykonawca", "PODWYKONAWSTWO UGC", "Wypłaty | UGC"],
   ];
 
   for (const [contractor, description, expected] of cases) {
@@ -30,9 +34,9 @@ describe("suggestCategory — reguły ogólne (koszty, bez PII)", () => {
     });
   }
 
-  it("nieznany koszt → Inne z niską pewnością", () => {
+  it("nieznany koszt → Pozostałe wydatki operacyjne z niską pewnością", () => {
     const s = suggestCategory("KOSZT", { contractor: "Losowa Firma XYZ", description: "coś" });
-    expect(s.category).toBe("Inne");
+    expect(s.category).toBe("Pozostałe wydatki operacyjne");
     expect(s.confidence).toBe("low");
   });
 
@@ -45,42 +49,44 @@ describe("suggestCategory — reguły ogólne (koszty, bez PII)", () => {
 
 describe("suggestCategory — reguły osobowe (mechanizm, dane FIKCYJNE)", () => {
   // fikcyjne reguły w formacie config/rw-people.json (znormalizowane wzorce)
+  // reguły osobowe (config) używają STARYCH nazw — silnik mapuje je na aktywne
   const people: PersonRule[] = [
     { match: "jan kowalski|anna nowak", category: "Wypłaty zarządu", confidence: "high" },
     { match: "pawel sokol", category: "Delivery - podwykonawcy", confidence: "high" },
     { match: "biuro xyz", category: "Delivery - wynagrodzenia", confidence: "medium" },
   ];
 
-  it("dopasowuje po nazwisku przekazanym w `people`", () => {
+  it("dopasowuje po nazwisku + mapuje starą kategorię na aktywną", () => {
+    // „Wypłaty zarządu" (stara) → „Wypłaty | Zarząd" (aktywna)
     expect(
       suggestCategory("KOSZT", { contractor: "Jan Kowalski", description: "WYNAGRODZENIE" }, people)
         .category
-    ).toBe("Wypłaty zarządu");
+    ).toBe("Wypłaty | Zarząd");
   });
 
   it("polskie znaki (ł) są normalizowane w dopasowaniu osobowym", () => {
-    // „Paweł Sokół" → norm → „pawel sokol" → trafia we wzorzec „pawel sokol"
+    // „Paweł Sokół" → norm → „pawel sokol"; „Delivery - podwykonawcy" → „Wypłaty | UGC"
     const s = suggestCategory(
       "KOSZT",
       { contractor: "Paweł Sokół", description: "UMOWA ZLECENIE" },
       people
     );
-    expect(s.category).toBe("Delivery - podwykonawcy");
+    expect(s.category).toBe("Wypłaty | UGC");
     expect(s.confidence).toBe("high");
   });
 
-  it("reguła osobowa MA PRIORYTET nad ogólną", () => {
-    // „biuro xyz" trafiłoby na słowo kluczowe, ale reguła osobowa wygrywa (Delivery - wynagrodzenia)
+  it("reguła osobowa MA PRIORYTET nad ogólną (mapowana na aktywną)", () => {
+    // „Delivery - wynagrodzenia" (stara) → „Wypłaty | Zespół" (aktywna)
     expect(
       suggestCategory("KOSZT", { contractor: "Biuro XYZ", description: "" }, people).category
-    ).toBe("Delivery - wynagrodzenia");
+    ).toBe("Wypłaty | Zespół");
   });
 
-  it("bez `people` (publiczny klon) nazwisko spada na regułę ogólną / Inne", () => {
-    // brak reguł osobowych → „Jan Kowalski / WYNAGRODZENIE" nie ma trafienia ogólnego → Inne
+  it("bez `people` (publiczny klon) nazwisko spada na fallback operacyjny", () => {
+    // brak reguł osobowych → brak trafienia ogólnego → „Pozostałe wydatki operacyjne"
     expect(
       suggestCategory("KOSZT", { contractor: "Jan Kowalski", description: "WYNAGRODZENIE" }).category
-    ).toBe("Inne");
+    ).toBe("Pozostałe wydatki operacyjne");
   });
 
   it("błędny wzorzec regex w configu nie wysypuje kategoryzacji", () => {

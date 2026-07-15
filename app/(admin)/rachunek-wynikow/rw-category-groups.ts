@@ -9,7 +9,9 @@ import {
 } from "@/lib/rw-types";
 
 export function categoryGroups(kind: RwKind) {
-  const cats = RW_CATEGORIES.filter((c) => c.kind === kind);
+  // tylko kategorie AKTYWNE — zdeprecjonowane (stara taksonomia) są ukryte
+  // w dropdownie, choć nadal ważne dla danych historycznych
+  const cats = RW_CATEGORIES.filter((c) => c.kind === kind && !c.deprecated);
   const buckets = [...new Set(cats.map((c) => c.bucket))] as RwBucket[];
   return buckets.map((b) => ({
     label: RW_BUCKET_LABELS[b],

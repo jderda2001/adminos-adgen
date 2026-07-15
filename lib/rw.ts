@@ -26,6 +26,19 @@ import {
   type RwKind,
 } from "./rw-types";
 
+// Kategorie składające się na linie „BOA" — sumowane po nazwach, żeby działały
+// jednocześnie stare (dane 2026) i nowe nazwy kategorii.
+const BOA_OSZCZEDNOSCI = ["Środki przelane na oszczędności", "Oszczędności"];
+const BOA_WLASCICIELE = ["Wypłaty zarządu", "Premie zarządu", "Wypłaty | Zarząd"];
+const BOA_ZALICZKA_CIT = ["Zaliczka na podatek CIT"];
+// pozostałe pozycje podatkowo-odłożone doliczane do „podatki + zaliczki"
+const BOA_PODATKI_EXTRA = [
+  "Zaliczka na premie zespołu",
+  "Zaliczki na CIT / premie",
+  "VAT",
+  "PIT",
+];
+
 export interface RwEntryLike {
   month: number; // 1–12
   kind: RwKind;
@@ -164,6 +177,11 @@ function cost(costByCategory: Record<string, number>, name: string): number {
   return costByCategory[name] ?? 0;
 }
 
+/** Suma wielu kategorii kosztowych (po nazwach — stare + nowe) */
+function costSum(costByCategory: Record<string, number>, names: string[]): number {
+  return names.reduce((s, n) => s + (costByCategory[n] ?? 0), 0);
+}
+
 export function buildRwReport(
   year: number,
   entries: RwEntryLike[],
@@ -174,6 +192,9 @@ export function buildRwReport(
   // inicjalizacja pełnych map kategorii (0), żeby UI zawsze miał wszystkie wiersze
   const emptyRevenue = () =>
     Object.fromEntries(rwCategoriesFor("PRZYCHOD").map((c) => [c.name, 0]));
+  // seed WSZYSTKICH kategorii (też zdeprecjonowanych) — spójne klucze we
+  // wszystkich miesiącach (brak NaN przy odczycie); tabela sama ukrywa
+  // zdeprecjonowane wiersze o zerowej sumie rocznej
   const emptyCost = () =>
     Object.fromEntries(rwCategoriesFor("KOSZT").map((c) => [c.name, 0]));
 
@@ -212,14 +233,13 @@ export function buildRwReport(
     const totals = computeTotals(perMonthRevenue[i], perMonthCost[i], perMonthBuckets[i]);
     const m = manualByMonth[i];
 
-    const wlascicieleGr =
-      cost(totals.costByCategory, "Wypłaty zarządu") +
-      cost(totals.costByCategory, "Premie zarządu");
-    const oszczednosciGr = cost(totals.costByCategory, "Środki przelane na oszczędności");
-    const zaliczkaCitGr = cost(totals.costByCategory, "Zaliczka na podatek CIT");
-    const zaliczkaPremieGr = cost(totals.costByCategory, "Zaliczka na premie zespołu");
-    // podatki + zaliczki: CIT (wiersz wyniku) + zaliczki (CIT i premie zespołu)
-    const podatkiIZaliczkiGr = totals.citGr + zaliczkaCitGr + zaliczkaPremieGr;
+    const wlascicieleGr = costSum(totals.costByCategory, BOA_WLASCICIELE);
+    const oszczednosciGr = costSum(totals.costByCategory, BOA_OSZCZEDNOSCI);
+    const zaliczkaCitGr = costSum(totals.costByCategory, BOA_ZALICZKA_CIT);
+    // podatki + zaliczki: CIT (wiersz wyniku) + zaliczka CIT + pozostałe pozycje
+    // podatkowo-odłożone (zaliczka premie, „Zaliczki na CIT / premie", VAT, PIT)
+    const podatkiIZaliczkiGr =
+      totals.citGr + zaliczkaCitGr + costSum(totals.costByCategory, BOA_PODATKI_EXTRA);
 
     const liveBoa: RwLiveBoa = {
       oszczednosci: ratio(-oszczednosciGr, totals.revenueTotalGr),

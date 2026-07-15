@@ -221,7 +221,10 @@ export function RwTable({ report }: { report: RwReport }) {
   ));
 
   const costRows = (bucket: RwBucket) =>
-    rwCategoriesInBucket(bucket).map((c) => (
+    rwCategoriesInBucket(bucket)
+      // aktywne zawsze; zdeprecjonowane tylko gdy mają dane w tym roku (suma ≠ 0)
+      .filter((c) => !c.deprecated || (suma.costByCategory[c.name] ?? 0) !== 0)
+      .map((c) => (
       <MetricRow
         key={`${bucket}-${c.name}`}
         indent

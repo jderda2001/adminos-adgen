@@ -13,7 +13,7 @@
 // Silnik jest CZYSTY (bez bazy/API) — działa offline. W przyszłości można dołożyć
 // pass LLM dla operacji z niską pewnością (wymaga klucza API).
 
-import { findRwCategory, type RwKind } from "./rw-types";
+import { findRwCategory, activeCategoryName, type RwKind } from "./rw-types";
 
 export interface CategorySuggestion {
   category: string | null; // kanoniczna nazwa kategorii lub null (brak trafienia)
@@ -48,35 +48,36 @@ interface Rule {
 // Kolejność MA znaczenie — pierwsza pasująca reguła wygrywa. Reguły bardziej
 // szczegółowe (słowa kluczowe) przed ogólnymi. Wyłącznie sygnały OGÓLNE —
 // bez nazwisk (te są w config/rw-people.json, wstrzykiwane przez `people`).
+// Cele = nowa (aktywna) taksonomia kosztów adGen (14 kategorii).
 const COST_RULES: Rule[] = [
   // ── odłożone środki / podatki (frazy generyczne) ──
-  { test: /oszczednosci/, category: "Środki przelane na oszczędności", confidence: "high" },
-  { test: /zaliczka.*(premie|zespol)|premie zespol/, category: "Zaliczka na premie zespołu", confidence: "high" },
-  { test: /zaliczka.*cit/, category: "Zaliczka na podatek CIT", confidence: "high" },
+  { test: /oszczednosci/, category: "Oszczędności", confidence: "high" },
+  { test: /zaliczka.*(premie|zespol)|premie zespol/, category: "Zaliczki na CIT / premie", confidence: "high" },
+  { test: /zaliczka.*cit/, category: "Zaliczki na CIT / premie", confidence: "high" },
+  { test: /\bvat\b|podatek vat|vat-?7/, category: "VAT", confidence: "high" },
+  { test: /\bpit\b|pit-?4|zaliczka pit/, category: "PIT", confidence: "high" },
   { test: /urzad skarbowy|cit-?8|\bcit\b/, category: "CIT", confidence: "high" },
 
-  // ── księgowość / czynsz (słowa kluczowe) ──
-  { test: /ksiegow|biuro rachunkowe/, category: "Obsługa księgowa", confidence: "high" },
-  { test: /czynsz|wynajem biur/, category: "Biuro - czynsz", confidence: "high" },
+  // ── samochody / paliwo ──
+  { test: /paliwo|orlen|\bbp\b|shell|circle ?k|lotos|\bmoya\b|\bamic\b|stacja paliw|myjni|serwis samochod|opony|warsztat samochod|leasing/, category: "Samochody", confidence: "medium" },
 
-  // ── budżety reklamowe / marketing (platformy publiczne) ──
-  // Meta/Facebook: dominująco Marketing - budżety (bywa Delivery - budżet reklamowy → user poprawi)
-  { test: /meta ads|meta \(|facebook|\bmeta\b|google ads|woodpecker|mailerlite/, category: "Marketing - budżety", confidence: "low" },
-  { test: /instantly/, category: "Sprzedaż - zewnętrzny koszt", confidence: "medium" },
+  // ── budżety reklamowe (platformy publiczne) ──
+  { test: /meta ads|meta \(|facebook|\bmeta\b|google ads|tiktok ads|linkedin ads/, category: "Budżet reklamowy", confidence: "low" },
 
   // ── abonamenty / SaaS / telekomy (marki publiczne) ──
-  { test: /canva|clickup|click up|google workspace|google\b|openai|anthropic|claude|make\.com|make\b|sellizer|t-?mobile|\bplay\b|medicover|eleven ?labs|kie\.?ai|capcut|hostinger|hostido|ovh|stripo|webflow|zadarma|codekit|manus|exa\.ai|sms ?planet|app world|semrush|ahrefs|notion|slack|zoom|adobe|figma/, category: "Administracja - abonamenty", confidence: "high" },
+  { test: /canva|clickup|click up|google workspace|google\b|openai|anthropic|claude|make\.com|make\b|sellizer|t-?mobile|\bplay\b|medicover|eleven ?labs|kie\.?ai|capcut|hostinger|hostido|ovh|stripo|webflow|zadarma|codekit|manus|exa\.ai|sms ?planet|app world|semrush|ahrefs|notion|slack|zoom|adobe|figma|woodpecker|mailerlite|instantly/, category: "Abonamenty", confidence: "high" },
 
-  // ── sprzęt / networking / biuro (marki/retail + słowa kluczowe) ──
-  { test: /media expert|media markt|x-?kom|jysk|homla|artgift|euro rtv|komputronik/, category: "Biuro - sprzęt", confidence: "medium" },
-  { test: /restaurac|pizza|restaurant|bistro|kawiarni/, category: "Sprzedaż - networking, restauracje", confidence: "medium" },
-  { test: /allianz|ubezpiecz|firma budowlana/, category: "Biuro - pozostałe", confidence: "medium" },
+  // ── networking / restauracje / spotkania ──
+  { test: /restaurac|pizza|restaurant|bistro|kawiarni|networking|konferencj|\btarg\b/, category: "Networking", confidence: "medium" },
 
-  // ── podwykonawcy — słowo kluczowe generyczne (nazwiska: config/rw-people.json) ──
-  { test: /podwykonaw/, category: "Delivery - podwykonawcy", confidence: "low" },
+  // ── księgowość, czynsz, sprzęt, ubezpieczenia → pozostałe operacyjne ──
+  { test: /ksiegow|biuro rachunkowe|czynsz|wynajem biur|media expert|media markt|x-?kom|jysk|homla|artgift|euro rtv|komputronik|allianz|ubezpiecz|firma budowlana/, category: "Pozostałe wydatki operacyjne", confidence: "medium" },
 
-  // ── opłaty bankowe i drobne → Inne ──
-  { test: /mbank|nest bank|oplata za prowadzenie|mt940|prowizj|raporty|odsetki|blik|zwrot zakupu|zabka|lidl|netto|morele|poczta|uber|koleo|booking|allegro|glovo|zara/, category: "Inne", confidence: "low" },
+  // ── podwykonawcy / UGC — słowo kluczowe generyczne (nazwiska: config/rw-people.json) ──
+  { test: /podwykonaw|\bugc\b|creator|tworca|freelanc/, category: "Wypłaty | UGC", confidence: "low" },
+
+  // ── opłaty bankowe i drobne → pozostałe operacyjne ──
+  { test: /mbank|nest bank|oplata za prowadzenie|mt940|prowizj|raporty|odsetki|blik|zwrot zakupu|zabka|lidl|netto|morele|poczta|uber|koleo|booking|allegro|glovo|zara/, category: "Pozostałe wydatki operacyjne", confidence: "low" },
 ];
 
 const REVENUE_RULES: Rule[] = [
@@ -110,7 +111,9 @@ export function suggestCategory(
         continue; // błędny wzorzec w configu — pomiń, nie wysypuj importu
       }
       if (re.test(hint)) {
-        const cat = findRwCategory(kind, r.category);
+        // reguły osobowe (config) mogą używać STARYCH nazw → mapujemy na aktywne
+        const active = activeCategoryName(kind, r.category);
+        const cat = findRwCategory(kind, active);
         if (cat) return { category: cat.name, confidence: r.confidence };
       }
     }
@@ -120,13 +123,13 @@ export function suggestCategory(
   const rules = kind === "KOSZT" ? COST_RULES : REVENUE_RULES;
   for (const rule of rules) {
     if (rule.test.test(hint)) {
-      // upewnij się, że kategoria istnieje w taksonomii (spójność)
-      const cat = findRwCategory(kind, rule.category);
+      const active = activeCategoryName(kind, rule.category);
+      const cat = findRwCategory(kind, active);
       if (cat) return { category: cat.name, confidence: rule.confidence };
     }
   }
 
-  // brak trafienia: koszty najczęściej „Inne", ale z niską pewnością do sprawdzenia
-  if (kind === "KOSZT") return { category: "Inne", confidence: "low" };
+  // brak trafienia: koszty → „Pozostałe wydatki operacyjne" (niska pewność, do sprawdzenia)
+  if (kind === "KOSZT") return { category: "Pozostałe wydatki operacyjne", confidence: "low" };
   return { category: null, confidence: "low" };
 }

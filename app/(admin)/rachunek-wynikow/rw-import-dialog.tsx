@@ -106,9 +106,10 @@ function isFormatError(p: Preview): p is { formatError: string } {
   return "formatError" in p;
 }
 
-/** opcje kategorii pogrupowane sekcjami arkusza (do dropdownu), per kierunek */
+/** opcje kategorii pogrupowane sekcjami arkusza (do dropdownu), per kierunek.
+ *  Tylko kategorie AKTYWNE — zdeprecjonowane (stara taksonomia) ukryte. */
 function categoryGroups(kind: RwKind) {
-  const cats = RW_CATEGORIES.filter((c) => c.kind === kind);
+  const cats = RW_CATEGORIES.filter((c) => c.kind === kind && !c.deprecated);
   const buckets = [...new Set(cats.map((c) => c.bucket))] as RwBucket[];
   return buckets.map((b) => ({
     label: RW_BUCKET_LABELS[b],

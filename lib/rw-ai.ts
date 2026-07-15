@@ -17,9 +17,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import {
   RW_BUCKET_LABELS,
-  RW_CATEGORIES,
   findRwCategory,
-  rwCategoriesFor,
+  activeCategoryName,
+  rwActiveCategoriesFor,
   type RwKind,
 } from "./rw-types";
 
@@ -47,7 +47,7 @@ const MODEL = () => process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 export function buildTaxonomyPrompt(): string {
   const section = (kind: RwKind, title: string) =>
     `${title}:\n` +
-    rwCategoriesFor(kind)
+    rwActiveCategoriesFor(kind)
       .map((c) => `- "${c.name}" (${RW_BUCKET_LABELS[c.bucket]})`)
       .join("\n");
 
@@ -63,22 +63,31 @@ export function buildTaxonomyPrompt(): string {
     section("KOSZT", "Kategorie KOSZTÓW"),
     "",
     "Zasady metodologii adGen:",
-    "- Zwroty/refaktury/odsetki → „Inne\" (przychód lub koszt wg rodzaju).",
-    "- Płatności Meta/Facebook Ads → dominująco „Marketing - budżety\";",
-    "  gdy opis sugeruje kampanię dla klienta → „Delivery - budżet reklamowy\" (medium).",
-    "- SaaS/subskrypcje/telekomy → „Administracja - abonamenty\".",
-    "- Wynagrodzenia bez rozpoznawalnej roli osoby → najbliższa kategoria",
-    "  wynagrodzeń z confidence low.",
-    "- Przelewy na oszczędności → „Środki przelane na oszczędności\";",
-    "  zaliczki CIT / na premie zespołu → odpowiednie kategorie odłożonych środków.",
-    "- Gdy naprawdę nie wiadomo: KOSZT → „Inne\" (low); PRZYCHOD → najbliższa",
-    "  sensowna kategoria z confidence low.",
+    "- Płatności Meta/Facebook/Google/TikTok Ads → „Budżet reklamowy\".",
+    "- SaaS/subskrypcje/telekomy → „Abonamenty\".",
+    "- Wynagrodzenia zespołu/etaty → „Wypłaty | Zespół\"; twórcy/UGC/freelancerzy",
+    "  → „Wypłaty | UGC\"; wypłaty/premie zarządu → „Wypłaty | Zarząd\".",
+    "- Paliwo/serwis/leasing aut → „Samochody\".",
+    "- Restauracje/spotkania/networking/konferencje → „Networking\".",
+    "- Podatek VAT → „VAT\"; PIT/zaliczki PIT → „PIT\"; CIT → „CIT\".",
+    "- Przelewy na oszczędności → „Oszczędności\"; zaliczki na CIT / premie",
+    "  zespołu → „Zaliczki na CIT / premie\".",
+    "- Zwroty/refaktury/odsetki: PRZYCHOD → „Inne\".",
+    "- Gdy naprawdę nie wiadomo: KOSZT → „Pozostałe wydatki operacyjne\" (low);",
+    "  PRZYCHOD → najbliższa sensowna kategoria z confidence low.",
   ].join("\n");
 }
 
 /** JSON Schema odpowiedzi — enum wszystkich kategorii (obu rodzajów) */
 export function buildOutputSchema(): Record<string, unknown> {
-  const allNames = [...new Set(RW_CATEGORIES.map((c) => c.name))];
+  // enum tylko z kategorii AKTYWNYCH (model nie zaproponuje zdeprecjonowanej)
+  const allNames = [
+    ...new Set(
+      [...rwActiveCategoriesFor("PRZYCHOD"), ...rwActiveCategoriesFor("KOSZT")].map(
+        (c) => c.name
+      )
+    ),
+  ];
   return {
     type: "object",
     properties: {
@@ -124,7 +133,8 @@ export function validateAiSuggestions(
     const i = o.i as number;
     const row = byIndex.get(i);
     if (!row || seen.has(i)) continue;
-    const cat = findRwCategory(row.kind, o.category);
+    // zmapuj ewentualną starą nazwę na aktywną (spójność z nową taksonomią)
+    const cat = findRwCategory(row.kind, activeCategoryName(row.kind, o.category));
     if (!cat) continue; // kategoria złego rodzaju / spoza taksonomii
     const confidence =
       o.confidence === "high" || o.confidence === "low" ? o.confidence : "medium";
