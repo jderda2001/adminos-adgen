@@ -49,12 +49,19 @@ export default async function RachunekWynikowPage({
       where: { year },
       orderBy: { createdAt: "desc" },
     }),
-    db.rwVatRule.findMany({ select: { matchKey: true, vatRate: true } }),
+    db.rwVatRule.findMany({
+      select: { matchKey: true, vatRate: true, category: true },
+    }),
   ]);
 
-  // nauczone stawki VAT per kontrahent (klucz → %) — podpowiedź przy imporcie
+  // nauczone referencje per kontrahent (klucz → stawka VAT / kategoria) —
+  // podpowiedź przy imporcie na bazie wcześniejszych wyborów użytkownika
   const vatRules: Record<string, number> = {};
-  for (const r of vatRuleRows) vatRules[r.matchKey] = r.vatRate;
+  const categoryRules: Record<string, string> = {};
+  for (const r of vatRuleRows) {
+    vatRules[r.matchKey] = r.vatRate;
+    if (r.category) categoryRules[r.matchKey] = r.category;
+  }
 
   const report: RwReport = buildRwReport(
     year,
@@ -115,6 +122,7 @@ export default async function RachunekWynikowPage({
         internalRules={loadInternalRulesConfig()}
         knownAccounts={knownAccounts}
         vatRules={vatRules}
+        categoryRules={categoryRules}
         aiEnabled={Boolean(process.env.ANTHROPIC_API_KEY)}
       />
     </>

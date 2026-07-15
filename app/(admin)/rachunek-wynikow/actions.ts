@@ -14,22 +14,32 @@ import type { Prisma } from "@prisma/client";
 const RW_PATH = "/rachunek-wynikow";
 
 /**
- * Zapamiętuje referencje VAT per kontrahent (RwVatRule) — po zatwierdzeniu
- * importu i edycji. Agreguje po kluczu (ostatnia stawka wygrywa), zapisuje
- * tylko wiersze z sensownym kluczem. Dzięki temu kolejny import podpowie stawkę.
+ * Zapamiętuje referencje per kontrahent (RwVatRule) — po zatwierdzeniu importu
+ * i edycji. Uczy się STAWKI VAT oraz KATEGORII wybranej przez użytkownika.
+ * Agreguje po kluczu (ostatni wybór wygrywa), zapisuje tylko wiersze z sensownym
+ * kluczem. Dzięki temu kolejny import sam podpowie stawkę i kategorię.
  */
-async function learnVatRules(
+async function learnContractorRules(
   tx: Prisma.TransactionClient,
-  rows: { vatKey: string | null; vatRate: number; label: string | null }[]
+  rows: {
+    vatKey: string | null;
+    vatRate: number;
+    category: string | null;
+    label: string | null;
+  }[]
 ): Promise<void> {
-  const byKey = new Map<string, { vatRate: number; label: string | null; hits: number }>();
+  const byKey = new Map<
+    string,
+    { vatRate: number; category: string | null; label: string | null; hits: number }
+  >();
   for (const r of rows) {
     const key = (r.vatKey ?? "").trim();
     if (!key) continue;
     const prev = byKey.get(key);
     byKey.set(key, {
       vatRate: coerceVatRate(r.vatRate),
-      label: (r.label ?? prev?.label ?? null),
+      category: r.category ?? prev?.category ?? null,
+      label: r.label ?? prev?.label ?? null,
       hits: (prev?.hits ?? 0) + 1,
     });
   }
@@ -38,10 +48,17 @@ async function learnVatRules(
       where: { matchKey },
       update: {
         vatRate: v.vatRate,
+        category: v.category ?? undefined,
         label: v.label ?? undefined,
         hitCount: { increment: v.hits },
       },
-      create: { matchKey, vatRate: v.vatRate, label: v.label, hitCount: v.hits },
+      create: {
+        matchKey,
+        vatRate: v.vatRate,
+        category: v.category,
+        label: v.label,
+        hitCount: v.hits,
+      },
     });
   }
 }
@@ -328,9 +345,14 @@ export async function commitRwBankReviewAction(input: {
     await tx.rwEntry.createMany({
       data: data.map((d) => ({ ...d, batchId: created.id })),
     });
-    await learnVatRules(
+    await learnContractorRules(
       tx,
-      data.map((d) => ({ vatKey: d.vatKey, vatRate: d.vatRate, label: d.description }))
+      data.map((d) => ({
+        vatKey: d.vatKey,
+        vatRate: d.vatRate,
+        category: d.category,
+        label: d.description,
+      }))
     );
     return created;
   });
@@ -503,9 +525,14 @@ export async function updateRwBatchAction(input: {
       return;
     }
     await tx.rwEntry.createMany({ data });
-    await learnVatRules(
+    await learnContractorRules(
       tx,
-      data.map((d) => ({ vatKey: d.vatKey, vatRate: d.vatRate, label: d.description }))
+      data.map((d) => ({
+        vatKey: d.vatKey,
+        vatRate: d.vatRate,
+        category: d.category,
+        label: d.description,
+      }))
     );
     await tx.rwImportBatch.update({
       where: { id: batchId },

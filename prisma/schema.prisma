@@ -264,14 +264,16 @@ model RwEntry {
   @@index([batchId])
 }
 
-// Referencja stawek VAT per kontrahent — uczy się przy zatwierdzaniu importu
-// i edycji. Klucz (matchKey) liczony z opisu/konta w lib/rw-vat.ts. Pozwala
-// przy kolejnym imporcie automatycznie podpowiedzieć stawkę (netto liczone
-// z brutto). Dane wrażliwe (nazwy) NIE trafiają do repo — baza jest poza gitem.
+// Referencja per kontrahent — uczy się przy zatwierdzaniu importu i edycji.
+// Zapamiętuje STAWKĘ VAT oraz KATEGORIĘ wybraną przez użytkownika, żeby przy
+// kolejnym imporcie automatycznie je podpowiedzieć. Klucz (matchKey) liczony
+// z opisu/konta w lib/rw-vat.ts. Dane wrażliwe (nazwy) NIE trafiają do repo —
+// baza jest poza gitem.
 model RwVatRule {
   id        String   @id @default(cuid())
   matchKey  String   @unique // znormalizowany klucz kontrahenta (opis lub „acct:<nr>")
   vatRate   Int // 23 | 8 | 5 | 0
+  category  String? // ostatnia kategoria RW przypisana dla tego kontrahenta
   label     String? // czytelny podgląd (ostatni opis) — do wglądu w UI
   hitCount  Int      @default(1)
   updatedAt DateTime @updatedAt

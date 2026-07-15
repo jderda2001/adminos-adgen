@@ -62,6 +62,8 @@ import {
   RW_CATEGORIES,
   RW_BUCKET_LABELS,
   RW_MONTH_LABELS,
+  findRwCategory,
+  activeCategoryName,
   type RwBucket,
   type RwKind,
 } from "@/lib/rw-types";
@@ -171,6 +173,7 @@ export function RwImportDialog({
   internalRules = { selfNames: DEFAULT_SELF_NAMES, accounts: [] },
   knownAccounts = [],
   vatRules = {},
+  categoryRules = {},
   aiEnabled = false,
 }: {
   year: number;
@@ -180,6 +183,8 @@ export function RwImportDialog({
   knownAccounts?: BankAccount[];
   /** nauczone stawki VAT per kontrahent (klucz → %) — podpowiedź przy imporcie */
   vatRules?: Record<string, number>;
+  /** nauczone kategorie per kontrahent (klucz → kategoria) — podpowiedź przy imporcie */
+  categoryRules?: Record<string, string>;
   /** ANTHROPIC_API_KEY obecny na serwerze → przycisk „Doprecyzuj z AI" */
   aiEnabled?: boolean;
 }) {
@@ -211,6 +216,20 @@ export function RwImportDialog({
     const key = vatMatchKey({ account, description });
     const learned = key ? vatRules[key] : undefined;
     return learned !== undefined ? coerceVatRate(learned) : DEFAULT_VAT_RATE;
+  }
+
+  // kategoria z nauczonej referencji (poprzedni wybór usera dla tego kontrahenta);
+  // null gdy brak reguły lub nauczona kategoria nie pasuje do rodzaju operacji
+  function learnedCategoryForRow(
+    kind: RwKind,
+    account: string | null,
+    description: string | null
+  ): string | null {
+    const key = vatMatchKey({ account, description });
+    const learned = key ? categoryRules[key] : undefined;
+    if (!learned) return null;
+    const active = activeCategoryName(kind, learned);
+    return findRwCategory(kind, active) ? active : null;
   }
 
   const previewCount = useMemo(() => {
@@ -413,7 +432,11 @@ export function RwImportDialog({
           });
           continue;
         }
-        const s = suggestCategory(e.kind, { description: e.description }, peopleRules);
+        // nauczona kategoria (poprzedni wybór usera) ma priorytet nad heurystyką
+        const learnedCat = learnedCategoryForRow(e.kind, e.account || null, e.description || null);
+        const s = learnedCat
+          ? { category: learnedCat, confidence: "high" as const }
+          : suggestCategory(e.kind, { description: e.description }, peopleRules);
         main.push({
           kind: e.kind,
           month: e.month,
@@ -567,7 +590,8 @@ export function RwImportDialog({
           note: null,
           amountGr: s.row.amountGr,
           vatRate: vatForRow(s.row.account || null, s.row.description || null),
-          category: "",
+          category:
+            learnedCategoryForRow(s.row.kind, s.row.account || null, s.row.description || null) ?? "",
           source: "auto",
           confidence: "low",
           internal: true,
