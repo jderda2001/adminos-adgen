@@ -57,6 +57,8 @@ export interface ClientRow {
   offerTags: string | null; // tagi oferty rozdzielone przecinkami
   status: string;
   startDate: string | null; // ISO — serializowane z serwera
+  endDate: string | null; // ISO — koniec współpracy (do estymacji)
+  noticeMonths: number | null; // okres wypowiedzenia w miesiącach
   notes: string | null;
 }
 

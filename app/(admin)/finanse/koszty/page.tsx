@@ -106,6 +106,7 @@ export default async function CostsPage({
     categoryName: t.category.name,
     clientName: t.client?.name ?? null,
     dueDayOfMonth: t.dueDayOfMonth,
+    endPeriod: t.endPeriod,
   }));
 
   const categoryOptions = categories.map((c) => ({ id: c.id, name: c.name }));

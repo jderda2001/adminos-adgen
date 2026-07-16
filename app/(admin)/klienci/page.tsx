@@ -24,6 +24,8 @@ export default async function ClientsPage() {
     offerTags: c.offerTags,
     status: c.status,
     startDate: c.startDate?.toISOString() ?? null,
+    endDate: c.endDate?.toISOString() ?? null,
+    noticeMonths: c.noticeMonths,
     notes: c.notes,
   }));
 

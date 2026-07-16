@@ -54,6 +54,7 @@ export interface RecurringRow {
   categoryName: string;
   clientName: string | null;
   dueDayOfMonth: number;
+  endPeriod: string | null; // "RRRR-MM" — ostatni miesiąc generowania (raty)
 }
 
 export function RecurringCostsDialog({
@@ -267,6 +268,20 @@ function RecurringEditDialog({
                 defaultValue={template.dueDayOfMonth}
                 className="w-24"
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="recurring-end">Koniec (miesiąc, opcjonalnie)</Label>
+              <Input
+                id="recurring-end"
+                name="endPeriod"
+                type="month"
+                defaultValue={template.endPeriod ?? ""}
+                className="w-44"
+              />
+              <p className="text-xs text-muted-foreground">
+                Raty/leasingi — po tym miesiącu koszt przestaje się generować i
+                znika z estymacji. Puste = bez końca.
+              </p>
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>

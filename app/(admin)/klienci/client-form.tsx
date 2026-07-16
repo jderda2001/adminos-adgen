@@ -222,6 +222,35 @@ export function ClientFormDialog({
               />
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="endDate">Data zakończenia</Label>
+              <DatePicker
+                id="endDate"
+                name="endDate"
+                clearable
+                defaultValue={
+                  client?.endDate ? dateToInput(new Date(client.endDate)) : ""
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="noticeMonths">Okres wypowiedzenia (mies.)</Label>
+              <Input
+                id="noticeMonths"
+                name="noticeMonths"
+                type="number"
+                min={0}
+                max={24}
+                placeholder="np. 1"
+                defaultValue={client?.noticeMonths ?? ""}
+              />
+            </div>
+          </div>
+          <p className="-mt-1 text-xs text-muted-foreground">
+            Data zakończenia i okres wypowiedzenia zasilają moduł Estymacje
+            (przychód „umowny" vs „zakładany").
+          </p>
           <div className="space-y-2">
             <Label htmlFor="offerTagInput">Oferta / tagi</Label>
             {/* wartość przesyłana do akcji: tagi złączone przecinkiem */}

@@ -473,12 +473,20 @@ export async function updateRecurringCostAction(
     return fail("Dzień miesiąca jako termin płatności musi być liczbą od 1 do 28");
   }
 
+  // koniec generowania (raty/leasingi): "RRRR-MM" albo puste = bez końca
+  const endRaw = String(formData.get("endPeriod") ?? "").trim();
+  let endPeriod: string | null = null;
+  if (endRaw) {
+    if (!/^\d{4}-\d{2}$/.test(endRaw)) return fail("Nieprawidłowy miesiąc końca");
+    endPeriod = endRaw;
+  }
+
   const existing = await db.recurringCost.findUnique({ where: { id } });
   if (!existing) return fail("Szablon nie istnieje");
 
   await db.recurringCost.update({
     where: { id },
-    data: { netGr, dueDayOfMonth: day },
+    data: { netGr, dueDayOfMonth: day, endPeriod },
   });
   revalidatePath(KOSZTY_PATH);
   return ok("Szablon został zaktualizowany");

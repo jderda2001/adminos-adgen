@@ -35,6 +35,8 @@ const clientSchema = z.object({
   offerTags: z.string().trim().optional(),
   status: z.enum(CLIENT_STATUSES, { message: "Wybierz status" }),
   startDate: z.string().trim().optional(),
+  endDate: z.string().trim().optional(),
+  noticeMonths: z.string().trim().optional(),
   notes: z.string().trim().optional(),
 });
 
@@ -63,6 +65,8 @@ interface ClientData {
   offerTags: string | null;
   status: string;
   startDate: Date | null;
+  endDate: Date | null;
+  noticeMonths: number | null;
   notes: string | null;
 }
 
@@ -81,6 +85,8 @@ function parseClientForm(
     offerTags: formData.get("offerTags") ?? "",
     status: formData.get("status"),
     startDate: formData.get("startDate") ?? "",
+    endDate: formData.get("endDate") ?? "",
+    noticeMonths: formData.get("noticeMonths") ?? "",
     notes: formData.get("notes") ?? "",
   });
   if (!parsed.success) {
@@ -108,6 +114,24 @@ function parseClientForm(
     if (!startDate) return { success: false, error: "Podaj poprawną datę startu" };
   }
 
+  let endDate: Date | null = null;
+  if (d.endDate) {
+    endDate = dateFromInput(d.endDate);
+    if (!endDate) return { success: false, error: "Podaj poprawną datę zakończenia" };
+  }
+  if (startDate && endDate && endDate < startDate) {
+    return { success: false, error: "Data zakończenia nie może być przed datą startu" };
+  }
+
+  let noticeMonths: number | null = null;
+  if (d.noticeMonths) {
+    const n = parseInt(d.noticeMonths, 10);
+    if (!Number.isInteger(n) || n < 0 || n > 24) {
+      return { success: false, error: "Okres wypowiedzenia: podaj liczbę miesięcy 0–24" };
+    }
+    noticeMonths = n;
+  }
+
   return {
     success: true,
     data: {
@@ -122,6 +146,8 @@ function parseClientForm(
       offerTags: normalizeOfferTags(d.offerTags),
       status: d.status,
       startDate,
+      endDate,
+      noticeMonths,
       notes: d.notes || null,
     },
   };
