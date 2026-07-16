@@ -6,6 +6,7 @@ import { ColumnDef } from "@tanstack/react-table";
 import {
   CircleX,
   Download,
+  Info,
   Paperclip,
   Pencil,
   Clock,
@@ -56,20 +57,26 @@ import {
 } from "@/components/ui/tooltip";
 import {
   daysOverdue,
+  formatAmount,
   formatDate,
   formatMoney,
+  parseMoneyToGr,
   pluralPl,
   todayUTC,
 } from "@/lib/format";
 import { COST_APPROVAL_LABELS, VAT_RATE_LABELS, isVatRate } from "@/lib/types";
 import type { ActionResult } from "@/lib/action-result";
+import { cn } from "@/lib/utils";
+import { DatePicker } from "@/components/date-picker";
 import {
   deleteCostAction,
   togglePaidAction,
   toggleApprovalAction,
   toggleDelayedAction,
+  patchCostAction,
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
+import { categoryBadgeClass, categoryPillClass } from "./category-color";
 import { RecurringCostsDialog, type RecurringRow } from "./recurring-dialog";
 import { CostImportDialog } from "./cost-import-dialog";
 
@@ -111,6 +118,155 @@ function AssignmentBadge({ clientName }: { clientName: string | null }) {
   return <StatusBadge tone="neutral">Koszt ogólny</StatusBadge>;
 }
 
+// ── Edycja inline z listy (bez rozwijania szczegółów) ────────────────
+// Zapis pojedynczego pola przez patchCostAction; revalidatePath odświeża dane.
+
+function useCostPatch() {
+  const [pending, startTransition] = useTransition();
+  const run = (id: string, patch: Parameters<typeof patchCostAction>[1]) =>
+    startTransition(async () => {
+      const res = await patchCostAction(id, patch);
+      if (!res.ok) toast.error(res.error);
+    });
+  return { pending, run };
+}
+
+/** Kategoria — kolorowy dropdown edytowalny wprost z wiersza */
+function InlineCategory({
+  cost,
+  categories,
+}: {
+  cost: CostRow;
+  categories: { id: string; name: string }[];
+}) {
+  const { pending, run } = useCostPatch();
+  return (
+    <Select
+      value={cost.categoryId}
+      disabled={pending}
+      onValueChange={(v) => v !== cost.categoryId && run(cost.id, { categoryId: v })}
+    >
+      <SelectTrigger
+        size="sm"
+        className="h-7 w-full border-transparent bg-transparent px-1 shadow-none hover:bg-muted/60 focus:border-ring"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {categories.map((c) => (
+          <SelectItem key={c.id} value={c.id}>
+            <span className={categoryPillClass(c.name)}>{c.name}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** Tekst edytowalny po kliknięciu (dostawca) */
+function InlineSupplier({ cost }: { cost: CostRow }) {
+  const { pending, run } = useCostPatch();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(cost.supplierName);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setVal(cost.supplierName);
+          setEditing(true);
+        }}
+        className="max-w-full truncate text-left font-medium hover:text-primary"
+        title="Kliknij, aby edytować"
+      >
+        {cost.supplierName}
+      </button>
+    );
+  }
+  const save = () => {
+    setEditing(false);
+    const s = val.trim();
+    if (s && s !== cost.supplierName) run(cost.id, { supplierName: s });
+  };
+  return (
+    <Input
+      autoFocus
+      value={val}
+      disabled={pending}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          save();
+        } else if (e.key === "Escape") setEditing(false);
+      }}
+      className="h-7"
+    />
+  );
+}
+
+/** Kwota netto edytowalna po kliknięciu (VAT/brutto przeliczane serwerowo) */
+function InlineNet({ cost }: { cost: CostRow }) {
+  const { pending, run } = useCostPatch();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => {
+          setVal(formatAmount(cost.netGr));
+          setEditing(true);
+        }}
+        className="tabular-nums hover:text-primary"
+        title="Kliknij, aby edytować"
+      >
+        {formatMoney(cost.netGr)}
+      </button>
+    );
+  }
+  const save = () => {
+    setEditing(false);
+    const gr = parseMoneyToGr(val);
+    if (gr !== null && gr !== cost.netGr) run(cost.id, { netGr: gr });
+  };
+  return (
+    <Input
+      autoFocus
+      inputMode="decimal"
+      value={val}
+      disabled={pending}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          save();
+        } else if (e.key === "Escape") setEditing(false);
+      }}
+      className="h-7 w-24 text-right tabular-nums"
+    />
+  );
+}
+
+/** Termin płatności — inline DatePicker */
+function InlineDue({ cost }: { cost: CostRow }) {
+  const { pending, run } = useCostPatch();
+  const iso = cost.dueDate ? cost.dueDate.slice(0, 10) : "";
+  const overdue =
+    !!cost.dueDate && !cost.paid && daysOverdue(new Date(cost.dueDate), todayUTC()) > 0;
+  return (
+    <DatePicker
+      value={iso}
+      clearable
+      disabled={pending}
+      onChange={(v) => v !== iso && run(cost.id, { dueDate: v || null })}
+      className={cn("w-36", overdue && "[&_button]:text-red-600 dark:[&_button]:text-red-400")}
+    />
+  );
+}
+
 export function CostsTable({
   costs,
   categories,
@@ -144,13 +300,14 @@ export function CostsTable({
     (platnosc !== "all" ? 1 : 0);
 
   // sortowanie z paska filtrów → stan początkowy tabeli (klucz wymusza remount)
-  const SORT_STATE: Record<string, { id: string; desc: boolean }> = {
-    docDate: { id: "docDate", desc: true },
-    kategoria: { id: "categoryName", desc: false },
-    dostawca: { id: "supplierName", desc: false },
-    kwota: { id: "netGr", desc: true },
+  const SORT_STATE: Record<string, { id: string; desc: boolean }[]> = {
+    docDate: [], // domyślnie: kolejność z bazy (data dokumentu malejąco = najnowsze)
+    termin: [{ id: "dueDate", desc: false }],
+    kategoria: [{ id: "categoryName", desc: false }],
+    dostawca: [{ id: "supplierName", desc: false }],
+    kwota: [{ id: "netGr", desc: true }],
   };
-  const sortState = [SORT_STATE[sort] ?? SORT_STATE.docDate];
+  const sortState = SORT_STATE[sort] ?? SORT_STATE.docDate;
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(searchParams.toString());
@@ -235,20 +392,13 @@ export function CostsTable({
         },
       },
       {
-        accessorKey: "docDate",
-        header: ({ column }) => (
-          <SortableHeader column={column}>Data dokumentu</SortableHeader>
-        ),
-        cell: ({ row }) => formatDate(new Date(row.original.docDate)),
-      },
-      {
         accessorKey: "supplierName",
         header: ({ column }) => (
           <SortableHeader column={column}>Dostawca</SortableHeader>
         ),
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5">
-            <span className="font-medium">{row.original.supplierName}</span>
+            <InlineSupplier cost={row.original} />
             {row.original.attachmentName && (
               <TooltipProvider>
                 <Tooltip>
@@ -288,12 +438,8 @@ export function CostsTable({
         header: ({ column }) => (
           <SortableHeader column={column}>Kategoria</SortableHeader>
         ),
-      },
-      {
-        accessorKey: "clientName",
-        header: "Przypisanie",
         cell: ({ row }) => (
-          <AssignmentBadge clientName={row.original.clientName} />
+          <InlineCategory cost={row.original} categories={categories} />
         ),
       },
       {
@@ -304,7 +450,11 @@ export function CostsTable({
           </SortableHeader>
         ),
         meta: { align: "right" },
-        cell: ({ row }) => formatMoney(row.original.netGr),
+        cell: ({ row }) => (
+          <div className="flex justify-end">
+            <InlineNet cost={row.original} />
+          </div>
+        ),
       },
       {
         accessorKey: "grossGr",
@@ -321,20 +471,28 @@ export function CostsTable({
         header: ({ column }) => (
           <SortableHeader column={column}>Termin</SortableHeader>
         ),
-        cell: ({ row }) => {
-          const c = row.original;
-          if (!c.dueDate) return "—";
-          const overdue =
-            !c.paid && daysOverdue(new Date(c.dueDate), todayUTC()) > 0;
-          return (
-            <span className={overdue ? "font-medium text-red-600 dark:text-red-400" : undefined}>
-              {formatDate(new Date(c.dueDate))}
-            </span>
-          );
-        },
+        cell: ({ row }) => <InlineDue cost={row.original} />,
+      },
+      {
+        id: "details",
+        header: "",
+        cell: ({ row }) => (
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title="Szczegóły"
+              aria-label="Szczegóły kosztu"
+              className="opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100"
+              onClick={() => setDetail(row.original)}
+            >
+              <Info className="size-4" />
+            </Button>
+          </div>
+        ),
       },
     ],
-    []
+    [categories]
   );
 
   return (
@@ -435,7 +593,8 @@ export function CostsTable({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="docDate">Dacie (najnowsze)</SelectItem>
+                  <SelectItem value="docDate">Dacie dokumentu (domyślnie)</SelectItem>
+                  <SelectItem value="termin">Terminie płatności</SelectItem>
                   <SelectItem value="kategoria">Kategorii</SelectItem>
                   <SelectItem value="dostawca">Dostawcy</SelectItem>
                   <SelectItem value="kwota">Kwocie (netto)</SelectItem>
@@ -503,10 +662,10 @@ export function CostsTable({
         scrollable
         dense
         initialSorting={sortState}
-        onRowClick={(row) => setDetail(row)}
+        rowClassName={() => "group"}
         footer={
           <>
-            <TableCell colSpan={5} className="font-medium">
+            <TableCell colSpan={3} className="font-medium">
               Suma ({filtered.length}{" "}
               {pluralPl(filtered.length, "pozycja", "pozycje", "pozycji")})
             </TableCell>
@@ -516,7 +675,7 @@ export function CostsTable({
             <TableCell className="text-right font-medium tabular-nums">
               {formatMoney(totals.grossGr)}
             </TableCell>
-            <TableCell />
+            <TableCell colSpan={2} />
           </>
         }
         emptyState={

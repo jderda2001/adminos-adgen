@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { categoryPillClass } from "./category-color";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/date-picker";
@@ -192,7 +193,7 @@ export function CostFormDialog({
                 <SelectContent>
                   {categories.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
-                      {c.name}
+                      <span className={categoryPillClass(c.name)}>{c.name}</span>
                     </SelectItem>
                   ))}
                 </SelectContent>

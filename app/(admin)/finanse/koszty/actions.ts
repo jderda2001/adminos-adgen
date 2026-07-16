@@ -355,6 +355,67 @@ export async function updateCostAction(
   return ok("Zmiany zostały zapisane");
 }
 
+// Edycja inline pojedynczych pól z listy kosztów (bez otwierania formularza).
+// Aktualizuje tylko przekazane pola; kwota netto przelicza VAT/brutto ze stawki.
+export async function patchCostAction(
+  id: string,
+  patch: {
+    categoryId?: string;
+    supplierName?: string;
+    dueDate?: string | null;
+    netGr?: number;
+  }
+): Promise<ActionResult> {
+  await requireAdmin();
+  const existing = await db.cost.findUnique({ where: { id } });
+  if (!existing) return fail("Koszt nie istnieje");
+
+  const data: {
+    categoryId?: string;
+    supplierName?: string;
+    dueDate?: Date | null;
+    netGr?: number;
+    vatGr?: number;
+    grossGr?: number;
+  } = {};
+
+  if (patch.categoryId !== undefined) {
+    const cat = await db.costCategory.findUnique({ where: { id: patch.categoryId } });
+    if (!cat) return fail("Wybrana kategoria nie istnieje");
+    data.categoryId = patch.categoryId;
+  }
+  if (patch.supplierName !== undefined) {
+    const s = patch.supplierName.trim();
+    if (!s) return fail("Podaj nazwę dostawcy");
+    data.supplierName = s.slice(0, 200);
+  }
+  if (patch.dueDate !== undefined) {
+    if (!patch.dueDate) {
+      data.dueDate = null;
+    } else {
+      const d = dateFromInput(patch.dueDate);
+      if (!d) return fail("Podaj poprawny termin płatności");
+      data.dueDate = d;
+    }
+  }
+  if (patch.netGr !== undefined) {
+    if (!Number.isInteger(patch.netGr) || patch.netGr < 0) return fail("Podaj poprawną kwotę netto");
+    const vr: VatRate = isVatRate(existing.vatRate) ? existing.vatRate : "23";
+    const { vatGr, grossGr } = computeVatFromNet(patch.netGr, vr);
+    data.netGr = patch.netGr;
+    data.vatGr = vatGr;
+    data.grossGr = grossGr;
+  }
+
+  if (Object.keys(data).length === 0) return ok("Bez zmian");
+
+  await db.cost.update({ where: { id }, data });
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(RW_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  return ok("Zapisano");
+}
+
 export async function deleteCostAction(id: string): Promise<ActionResult> {
   await requireAdmin();
   const existing = await db.cost.findUnique({ where: { id } });
