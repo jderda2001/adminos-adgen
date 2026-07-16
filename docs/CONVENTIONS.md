@@ -158,3 +158,20 @@ nie przytłaczając list.
 - Komunikaty walidacji po polsku, np. "Podaj poprawną kwotę, np. 1 234,56".
 - Klikalne wiersze tam, gdzie spec tego wymaga (`onRowClick` w DataTable).
 - Liczby w komórkach: wyrównane do prawej (`meta: { align: "right" }`).
+
+## Estymacje (prognoza finansowa)
+
+Zakładka `/estymacje` — prognoza przychodów/kosztów (P&L, netto) i cash flow
+(brutto) na 3/6/12 mies. Silnik `lib/forecast.ts` jest CZYSTY (bez bazy, `todayIso`
+z zewnątrz) — testy `tests/forecast.test.ts`. Warstwa AI `lib/forecast-ai.ts`
+(server-only, jak `lib/rw-ai.ts`) jest DORADCZA: `applyAiAdjustments` (czysta)
+skaluje wyłącznie składniki ZAKŁADANE. Wejście ładuje wspólny `forecast-data.ts`
+(`loadForecastInput`) — używany też przez `aiForecastAction` (serwer odbudowuje
+input, nie ufa klientowi).
+
+Modele: `CashSnapshot` (ręczny łączny stan kont — kotwica cash flow; suma kont,
+więc „Oszczędności" są neutralne), `FinPlanEvent` (jednorazowe zdarzenia
+gotówkowe), `Client.endDate/noticeMonths` (przychód umowny vs zakładany),
+`RecurringCost.endPeriod` (raty/leasingi — `generateRecurringCosts` kończy na tym
+miesiącu). Dedup szablon↔historia: `baselineResidual = max(0, śr.3M RW − Σszablonów)`.
+Bez wpisanego `CashSnapshot` cash flow = null (EmptyState z instrukcją).
