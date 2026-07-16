@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   LineChart,
+  ChartSpline,
   Banknote,
   Receipt,
   CreditCard,
@@ -31,6 +32,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/rachunek-wynikow", label: "Rachunek wyników", icon: LineChart },
+      { href: "/estymacje", label: "Estymacje", icon: ChartSpline },
     ],
   },
   {
