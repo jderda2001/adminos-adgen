@@ -12,8 +12,11 @@ import { isValidNrb, normalizeAccount } from "@/lib/elixir";
 import { dateFromInput, parseMoneyToGr, todayUTC } from "@/lib/format";
 import { monthKey } from "@/lib/periods";
 import { isVatRate, type VatRate } from "@/lib/types";
+import { findRwCategory, activeCategoryName } from "@/lib/rw-types";
 
 const KOSZTY_PATH = "/finanse/koszty";
+const RW_PATH = "/rachunek-wynikow";
+const ESTYMACJE_PATH = "/estymacje";
 const UPLOADS_DIR = path.join(process.cwd(), "uploads");
 
 const ALLOWED_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "webp"] as const;
@@ -520,4 +523,155 @@ export async function deleteRecurringCostAction(
   await db.recurringCost.delete({ where: { id } });
   revalidatePath(KOSZTY_PATH);
   return ok("Szablon został usunięty");
+}
+
+// ── Import CSV kosztów (backfill historyczny) ────────────────────────
+// Każdy wiersz tworzy dokument Cost (rejestr operacyjny) ORAZ wpis RwEntry
+// (rok/miesiąc z daty) — dane widoczne i w Kosztach (Dashboard/Rentowność),
+// i w Rachunku wyników + Estymacjach. Kategoria z przeglądu to kategoria RW;
+// CostCategory tworzymy/dobieramy po tej samej nazwie (upsert), co ujednolica
+// taksonomię. Koszty historyczne oznaczamy jako opłacone.
+
+export interface CostImportRow {
+  dateISO: string; // "RRRR-MM-DD"
+  year: number;
+  month: number; // 1–12
+  supplier: string;
+  category: string; // kategoria RW wybrana w przeglądzie
+  netGr: number; // dodatnie
+  vatRate: string; // 23 | 8 | 5 | 0 | ZW
+}
+
+export type CostImportResult =
+  | { ok: true; imported: number; years: number[] }
+  | { ok: false; error: string };
+
+const FALLBACK_COST_CATEGORY = "Pozostałe wydatki operacyjne";
+
+export async function commitCostImportAction(input: {
+  filename: string;
+  rows: CostImportRow[];
+}): Promise<CostImportResult> {
+  await requireAdmin();
+  const rows = Array.isArray(input.rows) ? input.rows : [];
+  if (rows.length === 0) return { ok: false, error: "Brak wierszy do zaimportowania" };
+  if (rows.length > 5000) return { ok: false, error: "Zbyt wiele wierszy naraz (limit 5000)" };
+
+  interface Prepared {
+    year: number;
+    month: number;
+    dateISO: string;
+    supplier: string;
+    rwCategory: string;
+    netGr: number;
+    vatRate: VatRate;
+    vatGr: number;
+    grossGr: number;
+  }
+  const prepared: Prepared[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const nr = i + 1;
+    if (!Number.isInteger(r.year) || r.year < 2020 || r.year > 2100) {
+      return { ok: false, error: `Wiersz ${nr}: nieprawidłowy rok` };
+    }
+    if (!Number.isInteger(r.month) || r.month < 1 || r.month > 12) {
+      return { ok: false, error: `Wiersz ${nr}: nieprawidłowy miesiąc` };
+    }
+    if (!Number.isInteger(r.netGr) || r.netGr <= 0) {
+      return { ok: false, error: `Wiersz ${nr}: nieprawidłowa kwota` };
+    }
+    const vatRate: VatRate = isVatRate(r.vatRate) ? (r.vatRate as VatRate) : "0";
+    // kategoria RW: zmapuj zdeprecjonowaną → aktywną; nieznaną → fallback operacyjny
+    const active = activeCategoryName("KOSZT", (r.category ?? "").trim());
+    const rwCategory = findRwCategory("KOSZT", active) ? active : FALLBACK_COST_CATEGORY;
+    const { vatGr, grossGr } = computeVatFromNet(r.netGr, vatRate);
+    prepared.push({
+      year: r.year,
+      month: r.month,
+      dateISO: r.dateISO,
+      supplier: (r.supplier || "—").slice(0, 200),
+      rwCategory,
+      netGr: r.netGr,
+      vatRate,
+      vatGr,
+      grossGr,
+    });
+  }
+
+  // upsert kategorii kosztowych po nazwie (ujednolicenie z taksonomią RW)
+  const catNames = [...new Set(prepared.map((p) => p.rwCategory))];
+  const catId = new Map<string, string>();
+  const maxPos = (await db.costCategory.aggregate({ _max: { position: true } }))._max.position ?? 0;
+  let pos = maxPos;
+  for (const name of catNames) {
+    const cat = await db.costCategory.upsert({
+      where: { name },
+      update: {},
+      create: { name, position: ++pos, isSalary: name.startsWith("Wypłaty") },
+    });
+    catId.set(name, cat.id);
+  }
+
+  // rok partii = dominujący wśród wierszy
+  const yearCounts = new Map<number, number>();
+  for (const p of prepared) yearCounts.set(p.year, (yearCounts.get(p.year) ?? 0) + 1);
+  const batchYear = [...yearCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+
+  await db.$transaction(async (tx) => {
+    const batch = await tx.rwImportBatch.create({
+      data: {
+        filename: (input.filename || "koszty.csv").slice(0, 200),
+        kind: "KOSZT",
+        year: batchYear,
+        rowCount: prepared.length,
+      },
+    });
+    await tx.rwEntry.createMany({
+      data: prepared.map((p) => ({
+        year: p.year,
+        month: p.month,
+        kind: "KOSZT",
+        category: p.rwCategory,
+        amountGr: -p.netGr,
+        grossGr: -p.grossGr,
+        vatRate: p.vatRate === "ZW" ? 0 : parseInt(p.vatRate, 10),
+        description: p.supplier,
+        bank: null,
+        note: `import kosztów ${p.dateISO}`,
+        source: "IMPORT",
+        batchId: batch.id,
+      })),
+    });
+    await tx.cost.createMany({
+      data: prepared.map((p) => {
+        const [y, m, d] = p.dateISO.split("-").map(Number);
+        const docDate = new Date(Date.UTC(y, m - 1, d));
+        return {
+          supplierName: p.supplier,
+          docNumber: "",
+          docDate,
+          dueDate: docDate,
+          netGr: p.netGr,
+          vatRate: p.vatRate,
+          vatGr: p.vatGr,
+          grossGr: p.grossGr,
+          categoryId: catId.get(p.rwCategory) as string,
+          clientId: null,
+          paid: true,
+          paidDate: docDate,
+          approvedForPayment: true,
+          needsConfirmation: false,
+          note: "import CSV",
+        };
+      }),
+    });
+  });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(RW_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  const years = [...new Set(prepared.map((p) => p.year))].sort((a, b) => a - b);
+  return { ok: true, imported: prepared.length, years };
 }

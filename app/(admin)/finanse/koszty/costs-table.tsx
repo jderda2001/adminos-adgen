@@ -62,6 +62,7 @@ import {
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
 import { RecurringCostsDialog, type RecurringRow } from "./recurring-dialog";
+import { CostImportDialog } from "./cost-import-dialog";
 
 export interface CostRow {
   id: string;
@@ -391,6 +392,7 @@ export function CostsTable({
               <Download className="size-4" /> Eksport CSV
             </a>
           </Button>
+          <CostImportDialog />
           <RecurringCostsDialog
             templates={templates}
             trigger={
