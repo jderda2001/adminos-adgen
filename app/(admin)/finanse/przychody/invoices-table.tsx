@@ -559,6 +559,9 @@ export function InvoicesTable({
                 value={paidDate}
                 onChange={setPaidDate}
               />
+              <p className="text-xs text-muted-foreground">
+                Dzień, w którym przelew został zaksięgowany na naszym koncie.
+              </p>
             </div>
           </div>
           <DialogFooter>
