@@ -318,12 +318,17 @@ export async function generateRecurringCosts(): Promise<number> {
     });
     if (claimed.count !== 1) continue;
 
-    // lista brakujących miesięcy: od następnego po lastGeneratedPeriod do bieżącego
+    // lista brakujących miesięcy: od następnego po lastGeneratedPeriod do bieżącego;
+    // endPeriod (raty/leasingi) ucina generowanie po ostatnim umownym miesiącu
     const periods: string[] = [];
     let period = t.lastGeneratedPeriod
       ? nextMonthKey(t.lastGeneratedPeriod)
       : currentPeriod;
-    while (period <= currentPeriod && periods.length < RECURRING_BACKFILL_LIMIT) {
+    while (
+      period <= currentPeriod &&
+      (t.endPeriod === null || period <= t.endPeriod) &&
+      periods.length < RECURRING_BACKFILL_LIMIT
+    ) {
       periods.push(period);
       period = nextMonthKey(period);
     }

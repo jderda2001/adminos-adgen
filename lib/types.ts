@@ -66,6 +66,7 @@ export const SETTING_DEFAULTS = {
   company_name: "adGen sp. z o.o.",
   company_address: "",
   company_account: "", // NRB 26 cyfr — rachunek zleceniodawcy do eksportu Elixir
+  estymacje_nowy_biznes_gr: "0", // założenie „nowy biznes"/mies. NETTO w groszach (moduł Estymacje)
 } as const;
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 

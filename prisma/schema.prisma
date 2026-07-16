@@ -67,6 +67,8 @@ model Client {
   offerTags         String? // tagi oferty rozdzielone przecinkami, np. "META ADS ABO,PAKIETY LEADÓW"
   status            String    @default("ACTIVE") // ACTIVE | ENDED
   startDate         DateTime?
+  endDate           DateTime? // koniec współpracy — estymacje liczą MRR do miesiąca endDate włącznie
+  noticeMonths      Int? // okres wypowiedzenia w miesiącach (estymacje: przychód „umowny" vs „zakładany")
   notes             String?
   createdAt         DateTime  @default(now())
 
@@ -180,9 +182,41 @@ model RecurringCost {
   dueDayOfMonth       Int     @default(10) // dzień miesiąca jako termin płatności kopii
   note                String?
   lastGeneratedPeriod String? // "RRRR-MM" ostatnio wygenerowanego miesiąca
+  endPeriod           String? // "RRRR-MM" OSTATNI generowany miesiąc (raty/leasingi) — potem koszt znika też z estymacji
   createdAt           DateTime @default(now())
 
   costs Cost[]
+}
+
+// ── Estymacje (prognoza finansowa) ───────────────────────────────────
+
+// Ręcznie wpisywany ŁĄCZNY stan kont firmy na daną datę — najnowszy wpis
+// kotwiczy prognozę cash flow (wyciągi bankowe nie niosą salda). Konwencja:
+// suma wszystkich kont, dlatego przelewy na oszczędności są w prognozie
+// neutralne (przepływ wewnętrzny).
+model CashSnapshot {
+  id        String   @id @default(cuid())
+  date      DateTime // stan na ten dzień
+  balanceGr Int // grosze, stan łączny
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([date])
+}
+
+// Jednorazowe planowane zdarzenie gotówkowe (BRUTTO — realny przepływ):
+// planowany zakup sprzętu, spodziewana premia od klienta, zwrot podatku itp.
+// Wpływa wyłącznie na cash flow (nie na P&L estymacji).
+model FinPlanEvent {
+  id        String   @id @default(cuid())
+  period    String // "RRRR-MM"
+  kind      String // INFLOW | OUTFLOW
+  label     String
+  amountGr  Int // BRUTTO, zawsze dodatnia (kierunek nadaje kind)
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([period])
 }
 
 // ── Czas pracy ───────────────────────────────────────────────────────
