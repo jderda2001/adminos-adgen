@@ -293,9 +293,12 @@ export function InvoiceFormDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="DRAFT">Bez FV</SelectItem>
+                    <SelectItem value="NOT_ISSUED">Nie wystawiona</SelectItem>
+                    <SelectItem value="WAITING">Czekamy</SelectItem>
                     <SelectItem value="ISSUED">Wysłana</SelectItem>
+                    <SelectItem value="NO_INVOICE">Bez faktury</SelectItem>
                     <SelectItem value="PAID">Opłacona</SelectItem>
+                    <SelectItem value="DRAFT">Szkic (Bez FV)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

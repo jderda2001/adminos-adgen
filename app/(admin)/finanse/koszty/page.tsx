@@ -82,6 +82,7 @@ export default async function CostsPage({
     clientName: c.client?.name ?? null,
     paid: c.paid,
     approvedForPayment: c.approvedForPayment,
+    delayed: c.delayed,
     paidDate: c.paidDate?.toISOString() ?? null,
     note: c.note,
     attachmentName: c.attachmentPath ? (c.attachmentName ?? c.attachmentPath) : null,

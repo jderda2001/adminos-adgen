@@ -6,7 +6,14 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { parseMoneyToGr, dateFromInput } from "@/lib/format";
-import { BILLING_MODELS, CLIENT_STATUSES } from "@/lib/types";
+import {
+  BILLING_MODELS,
+  BILLING_TIMINGS,
+  CLIENT_STATUSES,
+  CONTRACT_TYPES,
+  CONTRACT_TYPE_NOTICE_MONTHS,
+  type ContractType,
+} from "@/lib/types";
 
 const clientSchema = z.object({
   name: z.string().trim().min(1, "Podaj nazwę klienta"),
@@ -34,9 +41,10 @@ const clientSchema = z.object({
   monthlyRetainer: z.string().trim().optional(),
   offerTags: z.string().trim().optional(),
   status: z.enum(CLIENT_STATUSES, { message: "Wybierz status" }),
+  contractType: z.enum(CONTRACT_TYPES, { message: "Wybierz typ umowy" }),
+  billingTiming: z.enum(BILLING_TIMINGS, { message: "Wybierz rozliczenie" }),
   startDate: z.string().trim().optional(),
   endDate: z.string().trim().optional(),
-  noticeMonths: z.string().trim().optional(),
   notes: z.string().trim().optional(),
 });
 
@@ -64,6 +72,8 @@ interface ClientData {
   monthlyRetainerGr: number | null;
   offerTags: string | null;
   status: string;
+  contractType: string;
+  billingTiming: string;
   startDate: Date | null;
   endDate: Date | null;
   noticeMonths: number | null;
@@ -84,9 +94,10 @@ function parseClientForm(
     monthlyRetainer: formData.get("monthlyRetainer") ?? "",
     offerTags: formData.get("offerTags") ?? "",
     status: formData.get("status"),
+    contractType: formData.get("contractType"),
+    billingTiming: formData.get("billingTiming"),
     startDate: formData.get("startDate") ?? "",
     endDate: formData.get("endDate") ?? "",
-    noticeMonths: formData.get("noticeMonths") ?? "",
     notes: formData.get("notes") ?? "",
   });
   if (!parsed.success) {
@@ -123,14 +134,8 @@ function parseClientForm(
     return { success: false, error: "Data zakończenia nie może być przed datą startu" };
   }
 
-  let noticeMonths: number | null = null;
-  if (d.noticeMonths) {
-    const n = parseInt(d.noticeMonths, 10);
-    if (!Number.isInteger(n) || n < 0 || n > 24) {
-      return { success: false, error: "Okres wypowiedzenia: podaj liczbę miesięcy 0–24" };
-    }
-    noticeMonths = n;
-  }
+  // okres wypowiedzenia wyprowadzony z typu umowy (spójne z Estymacjami)
+  const noticeMonths = CONTRACT_TYPE_NOTICE_MONTHS[d.contractType as ContractType];
 
   return {
     success: true,
@@ -145,12 +150,56 @@ function parseClientForm(
       monthlyRetainerGr,
       offerTags: normalizeOfferTags(d.offerTags),
       status: d.status,
+      contractType: d.contractType,
+      billingTiming: d.billingTiming,
       startDate,
       endDate,
       noticeMonths,
       notes: d.notes || null,
     },
   };
+}
+
+/**
+ * „Złożył wypowiedzenie" — ustawia datę zakończenia współpracy na podstawie
+ * daty wypowiedzenia i okresu wypowiedzenia (z typu umowy). Rozliczamy z góry,
+ * więc np. wypowiedzenie 29.06 (1-mies.) → ostatni miesiąc świadczenia/faktury
+ * = lipiec → endDate = 31.07. Pusta data czyści wypowiedzenie (przywraca bieg).
+ */
+export async function setNoticeGivenAction(
+  id: string,
+  dateInput: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const client = await db.client.findUnique({ where: { id } });
+  if (!client) return fail("Klient nie istnieje");
+
+  if (!dateInput.trim()) {
+    await db.client.update({
+      where: { id },
+      data: { noticeGivenDate: null, endDate: null },
+    });
+    revalidatePath("/klienci");
+    revalidatePath("/estymacje");
+    return ok("Cofnięto wypowiedzenie");
+  }
+
+  const notice = dateFromInput(dateInput);
+  if (!notice) return fail("Podaj poprawną datę wypowiedzenia");
+  const noticeMonths =
+    client.noticeMonths ?? CONTRACT_TYPE_NOTICE_MONTHS[client.contractType as ContractType] ?? 0;
+  // ostatni miesiąc = miesiąc wypowiedzenia + okres wypowiedzenia; endDate = jego ostatni dzień
+  const y = notice.getUTCFullYear();
+  const m = notice.getUTCMonth() + noticeMonths;
+  const endDate = new Date(Date.UTC(y, m + 1, 0)); // dzień 0 następnego = ostatni dzień docelowego
+
+  await db.client.update({
+    where: { id },
+    data: { noticeGivenDate: notice, endDate },
+  });
+  revalidatePath("/klienci");
+  revalidatePath("/estymacje");
+  return ok("Zapisano wypowiedzenie — ustawiono datę zakończenia");
 }
 
 export async function createClientAction(

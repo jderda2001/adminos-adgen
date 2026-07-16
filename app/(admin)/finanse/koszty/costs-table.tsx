@@ -8,6 +8,7 @@ import {
   Download,
   Paperclip,
   Pencil,
+  Clock,
   Plus,
   Repeat,
   Trash2,
@@ -59,6 +60,7 @@ import {
   deleteCostAction,
   togglePaidAction,
   toggleApprovalAction,
+  toggleDelayedAction,
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
 import { RecurringCostsDialog, type RecurringRow } from "./recurring-dialog";
@@ -81,15 +83,17 @@ export interface CostRow {
   clientName: string | null;
   paid: boolean;
   approvedForPayment: boolean;
+  delayed: boolean;
   paidDate: string | null; // ISO
   note: string | null;
   attachmentName: string | null;
   recurringCostId: string | null;
 }
 
-/** Etykieta statusu akceptacji płatności kosztu */
+/** Etykieta statusu płatności kosztu */
 function costApprovalLabel(cost: CostRow): string {
   if (cost.paid) return COST_APPROVAL_LABELS.PAID;
+  if (cost.delayed) return COST_APPROVAL_LABELS.DELAYED;
   if (cost.approvedForPayment) return COST_APPROVAL_LABELS.APPROVED;
   return COST_APPROVAL_LABELS.NONE;
 }
@@ -201,7 +205,7 @@ export function CostsTable({
         cell: ({ row }) => {
           const c = row.original;
           return (
-            <StatusBadge tone={costTone(c.paid, c.approvedForPayment)}>
+            <StatusBadge tone={costTone(c.paid, c.approvedForPayment, c.delayed)}>
               {costApprovalLabel(c)}
             </StatusBadge>
           );
@@ -495,6 +499,17 @@ export function CostsTable({
                     <Wallet className="size-4" /> Można płacić
                   </Button>
                 ))}
+              {!detail.paid && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => runAction(() => toggleDelayedAction(detail.id))}
+                >
+                  <Clock className="size-4" />
+                  {detail.delayed ? "Cofnij opóźnienie" : "Opóźniamy"}
+                </Button>
+              )}
               <Button
                 size="sm"
                 disabled={pending}
@@ -525,7 +540,7 @@ export function CostsTable({
         {detail && (
           <div className="space-y-1">
             <DetailRow label="Status">
-              <StatusBadge tone={costTone(detail.paid, detail.approvedForPayment)}>
+              <StatusBadge tone={costTone(detail.paid, detail.approvedForPayment, detail.delayed)}>
                 {costApprovalLabel(detail)}
               </StatusBadge>
             </DetailRow>

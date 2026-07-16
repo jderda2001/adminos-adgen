@@ -23,9 +23,12 @@ export default async function ClientsPage() {
     monthlyRetainerGr: c.monthlyRetainerGr,
     offerTags: c.offerTags,
     status: c.status,
+    contractType: c.contractType,
+    billingTiming: c.billingTiming,
     startDate: c.startDate?.toISOString() ?? null,
     endDate: c.endDate?.toISOString() ?? null,
     noticeMonths: c.noticeMonths,
+    noticeGivenDate: c.noticeGivenDate?.toISOString() ?? null,
     notes: c.notes,
   }));
 

@@ -244,6 +244,8 @@ export interface ForecastClientLike {
   startDate: string | null;
   endDate: string | null;
   noticeMonths: number | null;
+  contractType?: string; // INDEFINITE_NOTICE | ONE_OFF_MONTH | ONE_OFF_PROJECT
+  billingTiming?: string; // UPFRONT (z góry) | ARREARS (z dołu)
 }
 export interface OpenInvoiceLike {
   id: string;
@@ -576,6 +578,13 @@ export function buildForecast(input: ForecastInput): ForecastResult {
       const endOk = !c.endDate || period <= periodOf(c.endDate);
       if (!startOk || !endOk) continue;
 
+      // umowy jednorazowe (projekt / 1 miesiąc): przychód tylko w miesiącu startu,
+      // bez powtarzalnego MRR w kolejnych miesiącach
+      const oneOff =
+        c.contractType === "ONE_OFF_MONTH" || c.contractType === "ONE_OFF_PROJECT";
+      const startPeriod = c.startDate ? periodOf(c.startDate) : m0;
+      if (oneOff && period !== startPeriod) continue;
+
       const hasRetainer = c.billingModel === "ABONAMENT" && (c.monthlyRetainerGr ?? 0) > 0;
       let netGr = 0;
       let source: PnlRevenueLine["source"] = "RUN_RATE";
@@ -605,7 +614,11 @@ export function buildForecast(input: ForecastInput): ForecastResult {
       const alreadyInvoiced = invoicedPeriods.get(c.id)?.has(period) ?? false;
       if (!alreadyInvoiced) {
         const pat = patternOf(c.id);
-        const issueIso = periodDayIso(period, pat.issueDay);
+        // rozliczenie z dołu: faktura za miesiąc świadczenia wychodzi 1. dnia
+        // NASTĘPNEGO miesiąca (z góry — w bieżącym); to przesuwa wpływ gotówki
+        const issuePeriod =
+          c.billingTiming === "ARREARS" ? addMonthsToPeriod(period, 1) : period;
+        const issueIso = periodDayIso(issuePeriod, pat.issueDay);
         const dateIso = addDaysIso(issueIso, pat.termDays + effectiveDelayDays(paymentStats, c.id));
         forecastInflowEvents.push({
           dateIso,

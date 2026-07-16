@@ -52,19 +52,23 @@ export function StatusBadge({
 
 const INVOICE_TONE: Record<string, StatusTone> = {
   DRAFT: "neutral",
+  NOT_ISSUED: "neutral",
+  WAITING: "amber",
   ISSUED: "blue",
+  NO_INVOICE: "indigo",
   PAID: "green",
   OVERDUE: "red",
 };
 
-/** Ton dla statusu faktury/przychodu (DRAFT/ISSUED/PAID/OVERDUE) */
+/** Ton dla statusu faktury/przychodu */
 export function invoiceTone(status: string): StatusTone {
   return INVOICE_TONE[status] ?? "neutral";
 }
 
-/** Ton dla statusu płatności kosztu (opłacony / można płacić / brak działań) */
-export function costTone(paid: boolean, approved: boolean): StatusTone {
+/** Ton dla statusu płatności kosztu (opłacony / opóźniamy / można płacić / brak działań) */
+export function costTone(paid: boolean, approved: boolean, delayed = false): StatusTone {
   if (paid) return "green";
+  if (delayed) return "amber";
   if (approved) return "indigo";
   return "neutral";
 }

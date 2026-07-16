@@ -403,6 +403,21 @@ export async function toggleApprovalAction(id: string): Promise<ActionResult> {
   );
 }
 
+/** Przełącz status „Opóźniamy" (świadome wstrzymanie płatności) */
+export async function toggleDelayedAction(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const existing = await db.cost.findUnique({ where: { id } });
+  if (!existing) return fail("Koszt nie istnieje");
+  if (existing.paid) return fail("Koszt jest już opłacony");
+
+  const delayed = !existing.delayed;
+  await db.cost.update({ where: { id }, data: { delayed } });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath("/platnosci");
+  return ok(delayed ? "Oznaczono: opóźniamy" : "Cofnięto opóźnienie");
+}
+
 // ── Akcje: potwierdzanie kopii cyklicznych ───────────────────────────
 
 export async function confirmCostAction(id: string): Promise<ActionResult> {

@@ -56,9 +56,12 @@ export interface ClientRow {
   monthlyRetainerGr: number | null;
   offerTags: string | null; // tagi oferty rozdzielone przecinkami
   status: string;
+  contractType: string; // typ umowy (INDEFINITE_NOTICE | ONE_OFF_MONTH | ONE_OFF_PROJECT)
+  billingTiming: string; // UPFRONT | ARREARS
   startDate: string | null; // ISO — serializowane z serwera
   endDate: string | null; // ISO — koniec współpracy (do estymacji)
-  noticeMonths: number | null; // okres wypowiedzenia w miesiącach
+  noticeMonths: number | null; // okres wypowiedzenia w miesiącach (z typu umowy)
+  noticeGivenDate: string | null; // ISO — data złożenia wypowiedzenia
   notes: string | null;
 }
 

@@ -178,6 +178,57 @@ describe("buildForecast — przychody (MRR / endDate / notice / run-rate)", () =
   });
 });
 
+describe("buildForecast — typ umowy i rozliczenie z góry/z dołu", () => {
+  it("umowa jednorazowa (projekt) → przychód tylko w miesiącu startu", () => {
+    const r = buildForecast(
+      baseInput({
+        horizonMonths: 3, // 07,08,09
+        clients: [
+          { id: "P", name: "Projekt X", billingModel: "ABONAMENT", status: "ACTIVE", monthlyRetainerGr: 400000, startDate: null, endDate: null, noticeMonths: null, contractType: "ONE_OFF_PROJECT" },
+        ],
+      })
+    );
+    expect(r.pnl[0].revenueNetGr).toBe(400000); // 07 = miesiąc startu (m0)
+    expect(r.pnl[1].revenueNetGr).toBe(0); // 08
+    expect(r.pnl[2].revenueNetGr).toBe(0); // 09
+  });
+
+  it("umowa jednorazowa (1 mies.) ze startem w przyszłości → tylko miesiąc startu", () => {
+    const r = buildForecast(
+      baseInput({
+        clients: [
+          { id: "Q", name: "Jednorazowy", billingModel: "ABONAMENT", status: "ACTIVE", monthlyRetainerGr: 200000, startDate: "2026-08-01", endDate: null, noticeMonths: null, contractType: "ONE_OFF_MONTH" },
+        ],
+      })
+    );
+    expect(r.pnl[0].revenueNetGr).toBe(0); // 07
+    expect(r.pnl[1].revenueNetGr).toBe(200000); // 08
+    expect(r.pnl[2].revenueNetGr).toBe(0); // 09
+  });
+
+  it("rozliczenie z dołu przesuwa wpływ gotówki o miesiąc względem z góry", () => {
+    const mk = (timing: string) =>
+      buildForecast(
+        baseInput({
+          snapshot: { dateIso: "2026-07-01", balanceGr: 0 },
+          clients: [
+            { id: "R", name: "Retainer", billingModel: "ABONAMENT", status: "ACTIVE", monthlyRetainerGr: 100000, startDate: null, endDate: null, noticeMonths: null, contractType: "INDEFINITE_NOTICE", billingTiming: timing },
+          ],
+        })
+      );
+    const inflow = (r: ReturnType<typeof buildForecast>, period: string) =>
+      (r.cash!.find((m) => m.period === period)?.events ?? [])
+        .filter((e) => e.clientId === "R")
+        .reduce((a, e) => a + e.amountGr, 0);
+
+    const upfront = mk("UPFRONT");
+    const arrears = mk("ARREARS");
+    expect(inflow(upfront, "2026-07")).toBeGreaterThan(0); // z góry: wpływ w lipcu
+    expect(inflow(arrears, "2026-07")).toBe(0); // z dołu: brak w lipcu
+    expect(inflow(arrears, "2026-08")).toBeGreaterThan(0); // z dołu: dopiero w sierpniu
+  });
+});
+
 describe("buildForecast — dedup m0", () => {
   it("klient zafakturowany w m0: brak prognozowanego wpływu w m0, P&L m0 = max(model, zafakturowane)", () => {
     const r = buildForecast(

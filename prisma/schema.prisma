@@ -66,9 +66,12 @@ model Client {
   monthlyRetainerGr Int? // MRR w groszach (dla modelu abonamentowego)
   offerTags         String? // tagi oferty rozdzielone przecinkami, np. "META ADS ABO,PAKIETY LEADÓW"
   status            String    @default("ACTIVE") // ACTIVE | ENDED
+  contractType      String    @default("INDEFINITE_NOTICE") // INDEFINITE_NOTICE | ONE_OFF_MONTH | ONE_OFF_PROJECT
+  billingTiming     String    @default("UPFRONT") // UPFRONT (z góry) | ARREARS (z dołu)
   startDate         DateTime?
   endDate           DateTime? // koniec współpracy — estymacje liczą MRR do miesiąca endDate włącznie
-  noticeMonths      Int? // okres wypowiedzenia w miesiącach (estymacje: przychód „umowny" vs „zakładany")
+  noticeMonths      Int? // okres wypowiedzenia w miesiącach (wyprowadzany z contractType)
+  noticeGivenDate   DateTime? // data złożenia wypowiedzenia (ustawia endDate wg okresu wypowiedzenia)
   notes             String?
   createdAt         DateTime  @default(now())
 
@@ -151,6 +154,7 @@ model Cost {
   paid              Boolean   @default(false)
   paidDate          DateTime?
   approvedForPayment Boolean  @default(false) // "Można płacić" — zatwierdzenie do płatności (dwustopniowy flow)
+  delayed           Boolean   @default(false) // "Opóźniamy" — świadome wstrzymanie płatności
   needsConfirmation Boolean   @default(false) // kopia z kosztu cyklicznego czeka na zatwierdzenie
   note              String?
   attachmentPath    String? // ścieżka w /uploads

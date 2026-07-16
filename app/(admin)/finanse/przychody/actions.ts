@@ -38,7 +38,9 @@ const invoiceSchema = z.object({
   offerTags: z.string().optional().default(""),
   notes: z.string().optional().default(""),
   status: z
-    .enum(["DRAFT", "ISSUED", "PAID"], { message: "Wybierz status" })
+    .enum(["DRAFT", "NOT_ISSUED", "WAITING", "ISSUED", "NO_INVOICE", "PAID"], {
+      message: "Wybierz status",
+    })
     .optional(),
 });
 
@@ -54,7 +56,7 @@ interface ParsedInvoice {
   dueDate: Date;
   offerTags: string | null;
   notes: string | null;
-  status?: "DRAFT" | "ISSUED" | "PAID";
+  status?: "DRAFT" | "NOT_ISSUED" | "WAITING" | "ISSUED" | "NO_INVOICE" | "PAID";
 }
 
 /** Tagi „a, b ,c" → „a,c" (trim, bez pustych, bez duplikatów) */

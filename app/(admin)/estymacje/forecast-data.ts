@@ -51,6 +51,8 @@ export async function loadForecastInput(horizon: Horizon): Promise<ForecastInput
         startDate: true,
         endDate: true,
         noticeMonths: true,
+        contractType: true,
+        billingTiming: true,
       },
       orderBy: { name: "asc" },
     }),
@@ -126,6 +128,8 @@ export async function loadForecastInput(horizon: Horizon): Promise<ForecastInput
       startDate: c.startDate ? iso(c.startDate) : null,
       endDate: c.endDate ? iso(c.endDate) : null,
       noticeMonths: c.noticeMonths,
+      contractType: c.contractType,
+      billingTiming: c.billingTiming,
     })),
     openInvoices: openInvoices.map((i) => ({
       id: i.id,

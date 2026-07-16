@@ -7,11 +7,22 @@ export const ROLE_LABELS: Record<Role, string> = {
   EMPLOYEE: "Pracownik",
 };
 
-export const INVOICE_STATUSES = ["DRAFT", "ISSUED", "PAID", "OVERDUE"] as const;
+export const INVOICE_STATUSES = [
+  "DRAFT",
+  "NOT_ISSUED",
+  "WAITING",
+  "ISSUED",
+  "NO_INVOICE",
+  "PAID",
+  "OVERDUE",
+] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   DRAFT: "Szkic",
+  NOT_ISSUED: "Nie wystawiona",
+  WAITING: "Czekamy",
   ISSUED: "Wystawiona",
+  NO_INVOICE: "Bez faktury",
   PAID: "Zapłacona",
   OVERDUE: "Przeterminowana",
 };
@@ -35,6 +46,40 @@ export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export const CLIENT_STATUS_LABELS: Record<ClientStatus, string> = {
   ACTIVE: "Aktywny",
   ENDED: "Zakończony",
+};
+
+// Typ umowy — steruje okresem wypowiedzenia i tym, czy przychód powtarza się
+// co miesiąc (MRR) czy jest jednorazowy (tylko miesiąc startu) w Estymacjach.
+export const CONTRACT_TYPES = [
+  "INDEFINITE_NOTICE",
+  "ONE_OFF_MONTH",
+  "ONE_OFF_PROJECT",
+] as const;
+export type ContractType = (typeof CONTRACT_TYPES)[number];
+export const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
+  INDEFINITE_NOTICE: "Czas nieokreślony (1-mies. wypowiedzenie)",
+  ONE_OFF_MONTH: "Umowa jednorazowa (1 miesiąc)",
+  ONE_OFF_PROJECT: "Projekt jednorazowy",
+};
+/** okres wypowiedzenia w miesiącach wg typu umowy */
+export const CONTRACT_TYPE_NOTICE_MONTHS: Record<ContractType, number> = {
+  INDEFINITE_NOTICE: 1,
+  ONE_OFF_MONTH: 0,
+  ONE_OFF_PROJECT: 0,
+};
+/** czy przychód jest jednorazowy (bez powtarzalnego MRR w prognozie) */
+export const CONTRACT_TYPE_ONE_OFF: Record<ContractType, boolean> = {
+  INDEFINITE_NOTICE: false,
+  ONE_OFF_MONTH: true,
+  ONE_OFF_PROJECT: true,
+};
+
+// Rozliczenie: z góry (faktura za bieżący miesiąc) / z dołu (za miniony miesiąc)
+export const BILLING_TIMINGS = ["UPFRONT", "ARREARS"] as const;
+export type BillingTiming = (typeof BILLING_TIMINGS)[number];
+export const BILLING_TIMING_LABELS: Record<BillingTiming, string> = {
+  UPFRONT: "Z góry (za bieżący miesiąc)",
+  ARREARS: "Z dołu (za miniony miesiąc)",
 };
 
 // Stawki VAT: wartość w bazie → ułamek i etykieta
@@ -91,6 +136,7 @@ export const DEFAULT_COST_CATEGORIES: ReadonlyArray<{
 export const COST_APPROVAL_LABELS = {
   NONE: "Brak działań",
   APPROVED: "Można płacić",
+  DELAYED: "Opóźniamy",
   PAID: "Opłacone",
 } as const;
 

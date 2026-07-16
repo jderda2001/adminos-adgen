@@ -27,8 +27,12 @@ import { X } from "lucide-react";
 import {
   BILLING_MODEL_LABELS,
   BILLING_MODELS,
+  BILLING_TIMING_LABELS,
+  BILLING_TIMINGS,
   CLIENT_STATUS_LABELS,
   CLIENT_STATUSES,
+  CONTRACT_TYPE_LABELS,
+  CONTRACT_TYPES,
   DEFAULT_OFFER_TAGS,
 } from "@/lib/types";
 import { dateToInput, formatAmount } from "@/lib/format";
@@ -235,21 +239,48 @@ export function ClientFormDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="noticeMonths">Okres wypowiedzenia (mies.)</Label>
-              <Input
-                id="noticeMonths"
-                name="noticeMonths"
-                type="number"
-                min={0}
-                max={24}
-                placeholder="np. 1"
-                defaultValue={client?.noticeMonths ?? ""}
-              />
+              <Label htmlFor="contractType">Typ umowy *</Label>
+              <Select
+                name="contractType"
+                defaultValue={client?.contractType ?? "INDEFINITE_NOTICE"}
+              >
+                <SelectTrigger id="contractType" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CONTRACT_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {CONTRACT_TYPE_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="billingTiming">Rozliczenie *</Label>
+              <Select
+                name="billingTiming"
+                defaultValue={client?.billingTiming ?? "UPFRONT"}
+              >
+                <SelectTrigger id="billingTiming" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BILLING_TIMINGS.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {BILLING_TIMING_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <p className="-mt-1 text-xs text-muted-foreground">
-            Data zakończenia i okres wypowiedzenia zasilają moduł Estymacje
-            (przychód „umowny" vs „zakładany").
+            Typ umowy (okres wypowiedzenia) i rozliczenie z góry/z dołu zasilają
+            Estymacje i logikę ostatniej faktury po wypowiedzeniu. Datę zakończenia
+            ustawi też przycisk „Złożył wypowiedzenie" w szczegółach klienta.
           </p>
           <div className="space-y-2">
             <Label htmlFor="offerTagInput">Oferta / tagi</Label>
