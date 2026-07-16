@@ -66,7 +66,7 @@ function parseCostForm(
   const parsed = costSchema.safeParse({
     supplierName: formData.get("supplierName"),
     supplierAccount: formData.get("supplierAccount") ?? "",
-    docNumber: formData.get("docNumber"),
+    docNumber: formData.get("docNumber") ?? "",
     docDate: formData.get("docDate"),
     dueDate: formData.get("dueDate") ?? "",
     net: formData.get("net"),
