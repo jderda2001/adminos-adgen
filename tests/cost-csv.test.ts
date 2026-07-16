@@ -1,62 +1,74 @@
-// Testy parsera CSV kosztów (lib/cost-csv.ts).
+// Testy parsera CSV kosztów (lib/cost-csv.ts) — realny układ arkusza (ClickUp):
+// wiersz tytułowy przed nagłówkiem, polskie daty słowne bez roku, netto+brutto.
 
 import { describe, expect, it } from "vitest";
-import { parseCostCsv, type CostCsvResult } from "@/lib/cost-csv";
+import { parseCostCsv, yearFromFilename, type CostCsvResult } from "@/lib/cost-csv";
 
-function ok(text: string): CostCsvResult {
-  const r = parseCostCsv(text);
+function ok(text: string, year = 2026): CostCsvResult {
+  const r = parseCostCsv(text, year);
   if ("formatError" in r) throw new Error("nieoczekiwany formatError: " + r.formatError);
   return r;
 }
 
-describe("parseCostCsv", () => {
-  it("separator ; + różne formaty dat + kwoty PL", () => {
-    const csv = [
-      "Data;Dostawca;Kategoria;Kwota netto",
-      "2025-03-15;Meta Platforms;Budżet reklamowy;2 460,00",
-      "05.11.2025;ZUS;Wypłaty | Zespół;1200,00",
-      "31/12/2026;Orlen;Samochody;300",
-    ].join("\n");
-    const r = ok(csv);
+describe("parseCostCsv — realny arkusz (tytuł + polskie daty + netto/brutto)", () => {
+  const csv = [
+    "Koszta", // wiersz tytułowy — pomijany
+    "Status;Opłacone;Faktura;Data rozliczenia;Kategoria;Wartość netto;Wartość Brutto;Wartość VAT;Komentarz",
+    "Brak działań;NIE;Google Workspace;1 sierpnia;Abonamenty;493,53;607,04;114;",
+    "Brak działań;NIE;Czynsz administracyjny | biuro;1 lipca;Pozostałe wydatki operacyjne;1100;1353;253;",
+    "Brak działań;NIE;Wypłaty UGC;15 lipca;Wypłaty | UGC;5000;5000;0;",
+  ].join("\n");
+
+  it("znajduje nagłówek po tytule i parsuje daty słowne z rokiem z parametru", () => {
+    const r = ok(csv, 2026);
     expect(r.rows).toHaveLength(3);
-    expect(r.rows[0]).toMatchObject({ dateISO: "2025-03-15", year: 2025, month: 3, supplier: "Meta Platforms", categoryText: "Budżet reklamowy", netGr: 246000 });
-    expect(r.rows[1]).toMatchObject({ dateISO: "2025-11-05", year: 2025, month: 11, netGr: 120000 });
-    expect(r.rows[2]).toMatchObject({ dateISO: "2026-12-31", year: 2026, month: 12, netGr: 30000 });
-  });
-
-  it("separator , wykrywany automatycznie", () => {
-    const csv = ["Data,Dostawca,Kategoria,Kwota", "2025-01-10,Canva,Abonamenty,120,00"].join("\n");
-    // uwaga: przecinek jako separator + przecinek dziesiętny są niejednoznaczne;
-    // tu kwota bez części dziesiętnej dla jednoznaczności
-    const csv2 = ["Data,Dostawca,Kategoria,Kwota", "2025-01-10,Canva,Abonamenty,120"].join("\n");
-    const r = ok(csv2);
-    expect(r.rows).toHaveLength(1);
-    expect(r.rows[0]).toMatchObject({ dateISO: "2025-01-10", supplier: "Canva", netGr: 12000 });
-    void csv;
-  });
-
-  it("opcjonalna kolumna VAT rozpoznawana", () => {
-    const csv = [
-      "Data;Dostawca;Kategoria;Kwota netto;VAT",
-      "2025-02-01;X;Abonamenty;1000,00;23",
-      "2025-02-02;Y;Networking;500,00;zw",
-    ].join("\n");
-    const r = ok(csv);
+    expect(r.rows[0]).toMatchObject({
+      dateISO: "2026-08-01",
+      year: 2026,
+      month: 8,
+      supplier: "Google Workspace",
+      categoryText: "Abonamenty",
+      netGr: 49353,
+      grossGr: 60704,
+    });
+    // 607,04 / 493,53 ≈ 1,23 → stawka 23
     expect(r.rows[0].vatRate).toBe("23");
-    expect(r.rows[1].vatRate).toBe("ZW");
+    expect(r.rows[1]).toMatchObject({ dateISO: "2026-07-01", month: 7, netGr: 110000, grossGr: 135300 });
+    // brutto = netto → 0%
+    expect(r.rows[2].vatRate).toBe("0");
   });
 
-  it("brak wymaganej kolumny Kwota → formatError", () => {
-    const r = parseCostCsv("Data;Dostawca;Kategoria\n2025-01-01;X;Abonamenty");
+  it("rok z parametru stosowany do wszystkich wierszy bez roku w dacie", () => {
+    const r = ok(csv, 2025);
+    expect(r.rows.every((x) => x.year === 2025)).toBe(true);
+  });
+});
+
+describe("parseCostCsv — formaty i błędy", () => {
+  it("daty numeryczne nadal działają", () => {
+    const csv = ["Data;Faktura;Kategoria;Wartość netto", "2025-03-15;Meta;Budżet reklamowy;2 460,00"].join("\n");
+    const r = ok(csv);
+    expect(r.rows[0]).toMatchObject({ dateISO: "2025-03-15", netGr: 246000 });
+  });
+
+  it("separator , wykrywany", () => {
+    const csv = ["Data,Faktura,Kategoria,Wartość netto", "2025-01-10,Canva,Abonamenty,120"].join("\n");
+    const r = ok(csv);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].netGr).toBe(12000);
+  });
+
+  it("brak kolumny daty → formatError", () => {
+    const r = parseCostCsv("Faktura;Kategoria;Wartość netto\nX;Abonamenty;1000", 2026);
     expect("formatError" in r).toBe(true);
   });
 
-  it("złe wiersze → errors, puste → pominięte", () => {
+  it("złe/puste wiersze → errors; puste → pominięte", () => {
     const csv = [
-      "Data;Dostawca;Kategoria;Kwota",
-      "2025-01-01;A;Abonamenty;1000,00",
-      "gg.gg.gggg;B;Inne;500", // zła data
-      "2025-01-03;C;Inne;abc", // zła kwota
+      "Data;Faktura;Kategoria;Wartość netto",
+      "1 stycznia;A;Abonamenty;1000,00",
+      "gg gg;B;Inne;500", // zła data
+      "3 stycznia;C;Inne;", // brak kwoty
       ";;;", // pusty
     ].join("\n");
     const r = ok(csv);
@@ -65,10 +77,18 @@ describe("parseCostCsv", () => {
     expect(r.skippedEmpty).toBe(1);
   });
 
-  it("brak dostawcy zastąpiony myślnikiem; kwota jako magnituda", () => {
-    const csv = ["Data;Dostawca;Kategoria;Kwota", "2025-05-05;;Inne;-1000,00"].join("\n");
+  it("brutto bez netto → netto = brutto; brak dostawcy → myślnik", () => {
+    const csv = ["Data;Faktura;Kategoria;Wartość Brutto", "5 maja;;Inne;1230,00"].join("\n");
     const r = ok(csv);
     expect(r.rows[0].supplier).toBe("—");
-    expect(r.rows[0].netGr).toBe(100000);
+    expect(r.rows[0].netGr).toBe(123000);
+    expect(r.rows[0].grossGr).toBe(123000);
+  });
+});
+
+describe("yearFromFilename", () => {
+  it("wyciąga rok z nazwy pliku", () => {
+    expect(yearFromFilename("Sierpień 2026 - Podsumowanie.csv")).toBe(2026);
+    expect(yearFromFilename("koszty.csv")).toBeNull();
   });
 });

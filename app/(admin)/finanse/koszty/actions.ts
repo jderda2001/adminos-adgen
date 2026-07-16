@@ -539,6 +539,7 @@ export interface CostImportRow {
   supplier: string;
   category: string; // kategoria RW wybrana w przeglądzie
   netGr: number; // dodatnie
+  grossGr: number; // dodatnie (brutto z pliku / z przeliczenia stawki)
   vatRate: string; // 23 | 8 | 5 | 0 | ZW
 }
 
@@ -586,7 +587,12 @@ export async function commitCostImportAction(input: {
     // kategoria RW: zmapuj zdeprecjonowaną → aktywną; nieznaną → fallback operacyjny
     const active = activeCategoryName("KOSZT", (r.category ?? "").trim());
     const rwCategory = findRwCategory("KOSZT", active) ? active : FALLBACK_COST_CATEGORY;
-    const { vatGr, grossGr } = computeVatFromNet(r.netGr, vatRate);
+    // brutto z pliku (autorytatywne); gdy brak/niższe od netto → policz ze stawki
+    const grossGr =
+      Number.isInteger(r.grossGr) && r.grossGr >= r.netGr
+        ? r.grossGr
+        : computeVatFromNet(r.netGr, vatRate).grossGr;
+    const vatGr = grossGr - r.netGr;
     prepared.push({
       year: r.year,
       month: r.month,
