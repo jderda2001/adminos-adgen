@@ -134,13 +134,12 @@ export function CostFormDialog({
 
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="docNumber">Nr dokumentu *</Label>
+              <Label htmlFor="docNumber">Nr dokumentu</Label>
               <Input
                 id="docNumber"
                 name="docNumber"
                 defaultValue={cost?.docNumber}
-                required
-                placeholder="np. FV 07/2026"
+                placeholder="np. FV 07/2026 (opcjonalnie)"
               />
             </div>
             <div className="space-y-2">

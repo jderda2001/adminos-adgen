@@ -27,7 +27,7 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024; // 10 MB
 const costSchema = z.object({
   supplierName: z.string().trim().min(1, "Podaj nazwę dostawcy"),
   supplierAccount: z.string().trim().optional(),
-  docNumber: z.string().trim().min(1, "Podaj numer dokumentu"),
+  docNumber: z.string().trim().optional().default(""),
   docDate: z.string().trim().min(1, "Podaj datę dokumentu"),
   dueDate: z.string().trim().optional(),
   net: z.string().trim().min(1, "Podaj kwotę netto"),
