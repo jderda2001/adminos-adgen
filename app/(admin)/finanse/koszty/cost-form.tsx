@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Paperclip } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -103,47 +102,26 @@ export function CostFormDialog({
           <DialogTitle>{cost ? "Edytuj koszt" : "Nowy koszt"}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="supplierName">Dostawca *</Label>
-              <Input
-                id="supplierName"
-                name="supplierName"
-                list="cost-supplier-names"
-                defaultValue={cost?.supplierName}
-                required
-                placeholder="np. Google Ireland Ltd."
-              />
-              <datalist id="cost-supplier-names">
-                {supplierNames.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="supplierAccount">Nr rachunku dostawcy</Label>
-              <Input
-                id="supplierAccount"
-                name="supplierAccount"
-                inputMode="numeric"
-                defaultValue={cost?.supplierAccount ?? ""}
-                placeholder="26 cyfr (NRB)"
-              />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="supplierName">Dostawca *</Label>
+            <Input
+              id="supplierName"
+              name="supplierName"
+              list="cost-supplier-names"
+              defaultValue={cost?.supplierName}
+              required
+              placeholder="np. Google Ireland Ltd."
+            />
+            <datalist id="cost-supplier-names">
+              {supplierNames.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="docNumber">Nr dokumentu</Label>
-              <Input
-                id="docNumber"
-                name="docNumber"
-                defaultValue={cost?.docNumber}
-                placeholder="np. FV 07/2026 (opcjonalnie)"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="docDate">Data dokumentu *</Label>
+              <Label htmlFor="docDate">Data wystawienia *</Label>
               <DatePicker
                 id="docDate"
                 name="docDate"
@@ -278,22 +256,8 @@ export function CostFormDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="attachment">Załącznik (PDF, JPG, PNG, WEBP — maks. 10 MB)</Label>
-            <Input
-              id="attachment"
-              name="attachment"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png,.webp"
-            />
-            {cost?.attachmentName && (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Paperclip className="size-3.5" />
-                Obecny załącznik: {cost.attachmentName} — wybranie nowego pliku
-                nadpisze go
-              </p>
-            )}
-          </div>
+          {/* Nr rachunku dostawcy, Nr dokumentu i Załącznik tymczasowo ukryte
+              (niepotrzebne teraz przy dodawaniu kosztu — backend nadal je obsługuje) */}
 
           {!cost && (
             <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
