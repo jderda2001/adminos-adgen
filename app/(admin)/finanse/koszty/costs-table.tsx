@@ -11,10 +11,16 @@ import {
   Clock,
   Plus,
   Repeat,
+  SlidersHorizontal,
   Trash2,
   Upload,
   Wallet,
 } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { toast } from "sonner";
 import { DataTable, SortableHeader } from "@/components/data-table";
 import { DetailSheet, DetailRow } from "@/components/detail-sheet";
@@ -129,6 +135,22 @@ export function CostsTable({
   const kategoria = searchParams.get("kategoria") ?? "all";
   const przypisanie = searchParams.get("przypisanie") ?? "all";
   const platnosc = searchParams.get("platnosc") ?? "all";
+  const sort = searchParams.get("sort") ?? "docDate";
+
+  // liczba aktywnych filtrów (do plakietki na ikonie „Filtry")
+  const activeFilters =
+    (kategoria !== "all" ? 1 : 0) +
+    (przypisanie !== "all" ? 1 : 0) +
+    (platnosc !== "all" ? 1 : 0);
+
+  // sortowanie z paska filtrów → stan początkowy tabeli (klucz wymusza remount)
+  const SORT_STATE: Record<string, { id: string; desc: boolean }> = {
+    docDate: { id: "docDate", desc: true },
+    kategoria: { id: "categoryName", desc: false },
+    dostawca: { id: "supplierName", desc: false },
+    kwota: { id: "netGr", desc: true },
+  };
+  const sortState = [SORT_STATE[sort] ?? SORT_STATE.docDate];
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(searchParams.toString());
@@ -339,52 +361,89 @@ export function CostsTable({
 
       <div className="flex flex-wrap items-center gap-2">
         <PeriodFilter />
-        <Select
-          value={kategoria}
-          onValueChange={(v) => setParam("kategoria", v === "all" ? null : v)}
-        >
-          <SelectTrigger className="w-44" size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Wszystkie kategorie</SelectItem>
-            {categories.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={przypisanie}
-          onValueChange={(v) => setParam("przypisanie", v === "all" ? null : v)}
-        >
-          <SelectTrigger className="w-44" size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Wszystkie przypisania</SelectItem>
-            <SelectItem value="ogolny">Koszt ogólny</SelectItem>
-            {clients.map((c) => (
-              <SelectItem key={c.id} value={c.id}>
-                {c.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={platnosc}
-          onValueChange={(v) => setParam("platnosc", v === "all" ? null : v)}
-        >
-          <SelectTrigger className="w-40" size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Wszystkie płatności</SelectItem>
-            <SelectItem value="zaplacone">Zapłacone</SelectItem>
-            <SelectItem value="niezaplacone">Niezapłacone</SelectItem>
-          </SelectContent>
-        </Select>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm">
+              <SlidersHorizontal className="size-4" /> Filtry
+              {activeFilters > 0 && (
+                <span className="ml-1 grid size-4 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
+                  {activeFilters}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-64 space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Kategoria</label>
+              <Select
+                value={kategoria}
+                onValueChange={(v) => setParam("kategoria", v === "all" ? null : v)}
+              >
+                <SelectTrigger className="w-full" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Wszystkie kategorie</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Przypisanie</label>
+              <Select
+                value={przypisanie}
+                onValueChange={(v) => setParam("przypisanie", v === "all" ? null : v)}
+              >
+                <SelectTrigger className="w-full" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Wszystkie przypisania</SelectItem>
+                  <SelectItem value="ogolny">Koszt ogólny</SelectItem>
+                  {clients.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Płatność</label>
+              <Select
+                value={platnosc}
+                onValueChange={(v) => setParam("platnosc", v === "all" ? null : v)}
+              >
+                <SelectTrigger className="w-full" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Wszystkie płatności</SelectItem>
+                  <SelectItem value="zaplacone">Zapłacone</SelectItem>
+                  <SelectItem value="niezaplacone">Niezapłacone</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5 border-t pt-3">
+              <label className="text-xs font-medium text-muted-foreground">Sortuj po</label>
+              <Select value={sort} onValueChange={(v) => setParam("sort", v === "docDate" ? null : v)}>
+                <SelectTrigger className="w-full" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="docDate">Dacie (najnowsze)</SelectItem>
+                  <SelectItem value="kategoria">Kategorii</SelectItem>
+                  <SelectItem value="dostawca">Dostawcy</SelectItem>
+                  <SelectItem value="kwota">Kwocie (netto)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </PopoverContent>
+        </Popover>
         <Input
           placeholder="Szukaj: dostawca, nr dokumentu…"
           value={search}
@@ -438,9 +497,12 @@ export function CostsTable({
       </div>
 
       <DataTable
+        key={sort}
         columns={columns}
         data={filtered}
-        initialSorting={[{ id: "docDate", desc: true }]}
+        scrollable
+        dense
+        initialSorting={sortState}
         onRowClick={(row) => setDetail(row)}
         footer={
           <>

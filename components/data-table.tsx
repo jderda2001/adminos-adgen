@@ -37,6 +37,10 @@ interface DataTableProps<TData, TValue> {
   initialSorting?: SortingState;
   onRowClick?: (row: TData) => void;
   rowClassName?: (row: TData) => string | undefined;
+  /** wszystkie wiersze na jednej stronie, przewijane; nagłówek/stopka przyklejone */
+  scrollable?: boolean;
+  /** gęstszy układ (mniejsze wiersze i czcionka) — więcej mieści się na ekranie */
+  dense?: boolean;
 }
 
 export function DataTable<TData, TValue>({
@@ -48,8 +52,13 @@ export function DataTable<TData, TValue>({
   initialSorting = [],
   onRowClick,
   rowClassName,
+  scrollable = false,
+  dense = false,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>(initialSorting);
+
+  // tryb przewijalny: bez paginacji (wszystkie wiersze), scroll w kontenerze
+  const effectivePageSize = scrollable ? Math.max(data.length, 1) : pageSize;
 
   const table = useReactTable({
     data,
@@ -59,7 +68,7 @@ export function DataTable<TData, TValue>({
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    initialState: { pagination: { pageSize } },
+    initialState: { pagination: { pageSize: effectivePageSize } },
   });
 
   const pageCount = table.getPageCount();
@@ -71,9 +80,22 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
+      <div
+        className={cn(
+          "rounded-xl border bg-card shadow-[var(--shadow-card)]",
+          scrollable
+            ? "max-h-[calc(100vh-19rem)] overflow-auto"
+            : "overflow-hidden",
+          dense && "text-[13px] [&_td]:py-1.5"
+        )}
+      >
         <Table>
-          <TableHeader className="[&_tr]:border-b [&_tr]:bg-muted/40 [&_tr]:hover:bg-muted/40">
+          <TableHeader
+            className={cn(
+              "[&_tr]:border-b [&_tr]:bg-muted/40 [&_tr]:hover:bg-muted/40",
+              scrollable && "sticky top-0 z-20 [&_tr]:!bg-muted"
+            )}
+          >
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
@@ -122,7 +144,9 @@ export function DataTable<TData, TValue>({
             ))}
           </TableBody>
           {footer && (
-            <TableFooter>
+            <TableFooter
+              className={cn(scrollable && "sticky bottom-0 z-20")}
+            >
               <TableRow>{footer}</TableRow>
             </TableFooter>
           )}
