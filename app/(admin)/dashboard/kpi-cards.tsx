@@ -13,9 +13,10 @@ export interface KpiCardsProps {
   };
   vat: { dueGr: number };
   overdue: { totalGr: number; count: number };
+  overdueCosts: { totalGr: number; count: number };
 }
 
-export function KpiCards({ pnl, vat, overdue }: KpiCardsProps) {
+export function KpiCards({ pnl, vat, overdue, overdueCosts }: KpiCardsProps) {
   const profitTone =
     pnl.profitGr < 0 ? "negative" : pnl.profitGr > 0 ? "positive" : "default";
 
@@ -37,8 +38,16 @@ export function KpiCards({ pnl, vat, overdue }: KpiCardsProps) {
     "faktur"
   )} · brutto`;
 
+  const overdueCostsTone = overdueCosts.totalGr > 0 ? "negative" : "default";
+  const overdueCostsSub = `${overdueCosts.count} ${pluralPl(
+    overdueCosts.count,
+    "koszt",
+    "koszty",
+    "kosztów"
+  )} · brutto`;
+
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
       <KpiCard label="Przychody netto" value={formatMoney(pnl.revenueNetGr)} />
       <KpiCard label="Koszty netto" value={formatMoney(pnl.costsNetGr)} />
       <KpiCard
@@ -63,6 +72,13 @@ export function KpiCards({ pnl, vat, overdue }: KpiCardsProps) {
         value={formatMoney(overdue.totalGr)}
         sub={overdueSub}
         tone={overdueTone}
+        href="/platnosci"
+      />
+      <KpiCard
+        label="Zobowiązania przeterminowane"
+        value={formatMoney(overdueCosts.totalGr)}
+        sub={overdueCostsSub}
+        tone={overdueCostsTone}
         href="/platnosci"
       />
     </div>

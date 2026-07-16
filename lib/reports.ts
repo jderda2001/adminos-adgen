@@ -55,11 +55,15 @@ export async function refreshInvoiceStatuses(): Promise<void> {
 export interface DashboardData {
   pnl: PnL;
   vat: VatSummary;
+  /** należności przeterminowane — faktury sprzedażowe po terminie */
   overdue: { totalGr: number; count: number };
+  /** zobowiązania przeterminowane — nieopłacone koszty po terminie */
+  overdueCosts: { totalGr: number; count: number };
 }
 
 export async function getDashboardData(period: Period): Promise<DashboardData> {
-  const [revenueAgg, costAgg, overdueInvoices] = await Promise.all([
+  const today = todayUTC();
+  const [revenueAgg, costAgg, overdueInvoices, overdueCostAgg] = await Promise.all([
     db.invoice.aggregate({
       where: { ...REVENUE_WHERE, saleDate: { gte: period.from, lt: period.to } },
       _sum: { netGr: true, vatGr: true },
@@ -74,6 +78,13 @@ export async function getDashboardData(period: Period): Promise<DashboardData> {
       _sum: { grossGr: true },
       _count: true,
     }),
+    // zobowiązania przeterminowane — nieopłacone, zatwierdzalne koszty po terminie
+    // (jak lista „Do zapłaty" w Płatnościach); stan na dziś, poza filtrem okresu
+    db.cost.aggregate({
+      where: { paid: false, needsConfirmation: false, dueDate: { lt: today } },
+      _sum: { grossGr: true },
+      _count: true,
+    }),
   ]);
 
   return {
@@ -82,6 +93,10 @@ export async function getDashboardData(period: Period): Promise<DashboardData> {
     overdue: {
       totalGr: overdueInvoices._sum.grossGr ?? 0,
       count: overdueInvoices._count,
+    },
+    overdueCosts: {
+      totalGr: overdueCostAgg._sum.grossGr ?? 0,
+      count: overdueCostAgg._count,
     },
   };
 }

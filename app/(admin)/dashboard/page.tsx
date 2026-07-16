@@ -86,6 +86,7 @@ export default async function DashboardPage({
           pnl={dashboard.pnl}
           vat={dashboard.vat}
           overdue={dashboard.overdue}
+          overdueCosts={dashboard.overdueCosts}
         />
 
         <div className="grid gap-4 lg:grid-cols-2">
