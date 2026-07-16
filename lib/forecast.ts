@@ -373,20 +373,100 @@ export interface ForecastWarning {
   code: string;
   message: string;
 }
+export interface ForecastKpis {
+  closingEndGr: number | null;
+  minBalanceGr: number | null;
+  minBalanceDateIso: string | null;
+  firstNegativePeriod: string | null;
+  overdueBacklogGr: number;
+  doubtfulGr: number;
+}
 export interface ForecastResult {
   periods: string[];
   pnl: PnlMonth[];
   cash: CashMonth[] | null;
-  kpis: {
-    closingEndGr: number | null;
-    minBalanceGr: number | null;
-    minBalanceDateIso: string | null;
-    firstNegativePeriod: string | null;
-    overdueBacklogGr: number;
-    doubtfulGr: number;
-  };
+  kpis: ForecastKpis;
   paymentStats: PaymentStats;
   warnings: ForecastWarning[];
+  /** data stanu kont kotwiczącego prognozę (do rekomputacji scenariusza AI) */
+  snapshotDateIso: string | null;
+}
+
+// ── Montaż miesięcy cash + KPI (współdzielone z applyAiAdjustments) ──
+
+function compareIso(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Buduje miesiące cash z listy zdarzeń (już przefiltrowanych do horyzontu). */
+function assembleCashMonths(
+  liveEvents: CashEvent[],
+  periods: string[],
+  openingStart: number,
+  m0: string,
+  snapshotIso: string
+): CashMonth[] {
+  const byPeriod = new Map<string, CashEvent[]>();
+  for (const e of liveEvents) {
+    const arr = byPeriod.get(e.period) ?? [];
+    arr.push(e);
+    byPeriod.set(e.period, arr);
+  }
+  let balance = openingStart;
+  const out: CashMonth[] = [];
+  for (const period of periods) {
+    const opening = balance;
+    const evs = (byPeriod.get(period) ?? []).sort((a, b) => compareIso(a.dateIso, b.dateIso));
+    let inflows = 0;
+    let outflows = 0;
+    let minBalance = opening;
+    let minDate = period === m0 ? snapshotIso : `${period}-01`;
+    for (const e of evs) {
+      balance += e.amountGr;
+      if (e.amountGr >= 0) inflows += e.amountGr;
+      else outflows += -e.amountGr;
+      if (balance < minBalance) {
+        minBalance = balance;
+        minDate = e.dateIso;
+      }
+    }
+    out.push({
+      period,
+      openingGr: opening,
+      inflowsGr: inflows,
+      outflowsGr: outflows,
+      closingGr: balance,
+      minBalanceGr: minBalance,
+      minBalanceDateIso: minDate,
+      events: evs,
+    });
+  }
+  return out;
+}
+
+/** KPI gotówkowe z miesięcy cash (globalne minimum, pierwszy miesiąc pod kreską). */
+function cashKpisFrom(cash: CashMonth[]): {
+  closingEndGr: number;
+  minBalanceGr: number;
+  minBalanceDateIso: string;
+  firstNegativePeriod: string | null;
+} {
+  let minBalanceGr = cash[0]?.minBalanceGr ?? 0;
+  let minBalanceDateIso = cash[0]?.minBalanceDateIso ?? "";
+  let firstNegativePeriod: string | null = null;
+  for (const m of cash) {
+    if (m.minBalanceGr < minBalanceGr) {
+      minBalanceGr = m.minBalanceGr;
+      minBalanceDateIso = m.minBalanceDateIso;
+    }
+    if (firstNegativePeriod === null && m.minBalanceGr < 0) firstNegativePeriod = m.period;
+  }
+  return {
+    closingEndGr: cash[cash.length - 1]?.closingGr ?? 0,
+    minBalanceGr,
+    minBalanceDateIso,
+    firstNegativePeriod,
+  };
 }
 
 // ── Główna funkcja ───────────────────────────────────────────────────
@@ -675,76 +755,28 @@ export function buildForecast(input: ForecastInput): ForecastResult {
     }
 
     // filtr: tylko od dnia snapshotu i w horyzoncie
-    const live = events
-      .filter((e) => e.dateIso >= snapIso && periodSet.has(e.period))
-      .sort((a, b) => (a.dateIso < b.dateIso ? -1 : a.dateIso > b.dateIso ? 1 : 0));
-
-    const byPeriod = new Map<string, CashEvent[]>();
-    for (const e of live) {
-      const arr = byPeriod.get(e.period) ?? [];
-      arr.push(e);
-      byPeriod.set(e.period, arr);
-    }
-
-    let balance = input.snapshot.balanceGr;
-    cash = [];
-    for (const period of periods) {
-      const opening = balance;
-      const evs = byPeriod.get(period) ?? [];
-      let inflows = 0;
-      let outflows = 0;
-      let minBalance = opening;
-      let minDate = period === m0 ? snapIso : `${period}-01`;
-      for (const e of evs) {
-        balance += e.amountGr;
-        if (e.amountGr >= 0) inflows += e.amountGr;
-        else outflows += -e.amountGr;
-        if (balance < minBalance) {
-          minBalance = balance;
-          minDate = e.dateIso;
-        }
-      }
-      cash.push({
-        period,
-        openingGr: opening,
-        inflowsGr: inflows,
-        outflowsGr: outflows,
-        closingGr: balance,
-        minBalanceGr: minBalance,
-        minBalanceDateIso: minDate,
-        events: evs,
-      });
-    }
+    const live = events.filter((e) => e.dateIso >= snapIso && periodSet.has(e.period));
+    cash = assembleCashMonths(live, periods, input.snapshot.balanceGr, m0, snapIso);
   }
 
   // ── KPI ──
-  let minBalanceGr: number | null = null;
-  let minBalanceDateIso: string | null = null;
-  let firstNegativePeriod: string | null = null;
-  if (cash) {
-    for (const m of cash) {
-      if (minBalanceGr === null || m.minBalanceGr < minBalanceGr) {
-        minBalanceGr = m.minBalanceGr;
-        minBalanceDateIso = m.minBalanceDateIso;
-      }
-      if (firstNegativePeriod === null && m.minBalanceGr < 0) firstNegativePeriod = m.period;
-    }
-  }
+  const cashKpis = cash
+    ? cashKpisFrom(cash)
+    : {
+        closingEndGr: null as number | null,
+        minBalanceGr: null as number | null,
+        minBalanceDateIso: null as string | null,
+        firstNegativePeriod: null as string | null,
+      };
 
   return {
     periods,
     pnl,
     cash,
-    kpis: {
-      closingEndGr: cash ? cash[cash.length - 1].closingGr : null,
-      minBalanceGr,
-      minBalanceDateIso,
-      firstNegativePeriod,
-      overdueBacklogGr,
-      doubtfulGr,
-    },
+    kpis: { ...cashKpis, overdueBacklogGr, doubtfulGr },
     paymentStats,
     warnings,
+    snapshotDateIso: input.snapshot ? input.snapshot.dateIso : null,
   };
 }
 
@@ -752,4 +784,88 @@ function sumMapForClients(m: Map<string, number>): number {
   let s = 0;
   for (const v of m.values()) s += v;
   return s;
+}
+
+// ── Scenariusz AI (czysta transformacja baseline'u) ──────────────────
+
+export interface AiMonthAdjustment {
+  period: string;
+  revenueAdjPct: number; // korekta % przychodów ZAKŁADANYCH (nie umownych)
+  costAdjPct: number; // korekta % kosztów bazowych (BASELINE_RW)
+  note: string;
+}
+
+/** Wynik analizy AI (typ współdzielony klient↔serwer; kalkulacja w lib/forecast-ai). */
+export interface ForecastAiReview {
+  adjustments: AiMonthAdjustment[];
+  risks: string[];
+  narrative: string;
+  confidence: "high" | "medium" | "low";
+}
+
+/**
+ * Nakłada korekty AI na baseline — skaluje WYŁĄCZNIE składniki zakładane
+ * (assumed): przychody nie-umowne i koszty bazowe (BASELINE_RW). Znane faktury,
+ * szablony, podatki i zdarzenia pozostają nietknięte. Przelicza P&L, cash
+ * (łańcuch salda) i KPI. Funkcja czysta — używana po stronie klienta do
+ * przełączania scenariusza baseline ↔ AI (bez ponownego wywołania modelu).
+ */
+export function applyAiAdjustments(
+  base: ForecastResult,
+  adjustments: AiMonthAdjustment[]
+): ForecastResult {
+  const byPeriod = new Map(adjustments.map((a) => [a.period, a]));
+
+  const pnl = base.pnl.map((m) => {
+    const adj = byPeriod.get(m.period);
+    if (!adj) return m;
+    const revF = 1 + adj.revenueAdjPct / 100;
+    const costF = 1 + adj.costAdjPct / 100;
+    const assumedNetGr = Math.round(m.assumedNetGr * revF);
+    const revenueNetGr = m.contractedNetGr + assumedNetGr;
+    const revenueLines = m.revenueLines.map((l) =>
+      l.contracted ? l : { ...l, netGr: Math.round(l.netGr * revF) }
+    );
+    const costLines = m.costLines.map((l) =>
+      l.source === "BASELINE_RW" ? { ...l, netGr: Math.round(l.netGr * costF) } : l
+    );
+    const costsNetGr = costLines.reduce((a, l) => a + l.netGr, 0);
+    return {
+      ...m,
+      assumedNetGr,
+      revenueNetGr,
+      revenueLines,
+      costLines,
+      costsNetGr,
+      profitGr: revenueNetGr - costsNetGr,
+      marginFraction: revenueNetGr > 0 ? (revenueNetGr - costsNetGr) / revenueNetGr : null,
+    };
+  });
+
+  let cash = base.cash;
+  let kpis = base.kpis;
+  if (base.cash && base.snapshotDateIso) {
+    const m0 = base.periods[0];
+    const scaled: CashEvent[] = [];
+    for (const mo of base.cash) {
+      const adj = byPeriod.get(mo.period);
+      for (const e of mo.events) {
+        if (!adj || !e.assumed) {
+          scaled.push(e);
+          continue;
+        }
+        const f = e.amountGr >= 0 ? 1 + adj.revenueAdjPct / 100 : 1 + adj.costAdjPct / 100;
+        scaled.push({ ...e, amountGr: Math.round(e.amountGr * f) });
+      }
+    }
+    const opening = base.cash[0].openingGr;
+    cash = assembleCashMonths(scaled, base.periods, opening, m0, base.snapshotDateIso);
+    kpis = {
+      ...cashKpisFrom(cash),
+      overdueBacklogGr: base.kpis.overdueBacklogGr,
+      doubtfulGr: base.kpis.doubtfulGr,
+    };
+  }
+
+  return { ...base, pnl, cash, kpis };
 }

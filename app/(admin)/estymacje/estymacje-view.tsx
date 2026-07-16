@@ -1,16 +1,18 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { KpiCard } from "@/components/kpi-card";
 import { cn } from "@/lib/utils";
 import { formatMoney, formatDate } from "@/lib/format";
-import type { ForecastResult } from "@/lib/forecast";
+import { applyAiAdjustments, type ForecastResult, type ForecastAiReview } from "@/lib/forecast";
 import { SnapshotCard, type SnapshotRow } from "./snapshot-card";
 import { CashChart } from "./cash-chart";
 import { ForecastTable } from "./forecast-table";
 import { PaymentStatsTable } from "./payment-stats-table";
 import { EventsEditor, type PlanEventRow } from "./events-editor";
+import { AiPanel } from "./ai-panel";
 
 const HORIZONS = [3, 6, 12] as const;
 
@@ -20,6 +22,7 @@ export function EstymacjeView({
   snapshots,
   events,
   clientNames,
+  aiEnabled,
 }: {
   result: ForecastResult;
   horizon: number;
@@ -29,7 +32,14 @@ export function EstymacjeView({
   clientNames: Record<string, string>;
   aiEnabled: boolean;
 }) {
-  const { kpis, cash, pnl } = result;
+  const [review, setReview] = useState<ForecastAiReview | null>(null);
+  const [applied, setApplied] = useState(false);
+  // scenariusz AI: baseline ↔ z nałożonymi korektami (czysta transformacja)
+  const active = useMemo(
+    () => (applied && review ? applyAiAdjustments(result, review.adjustments) : result),
+    [applied, review, result]
+  );
+  const { kpis, cash, pnl } = active;
   const hasCash = cash !== null;
   const wynik3m = pnl.slice(0, 3).reduce((a, m) => a + m.profitGr, 0);
   const snapshotStale = result.warnings.some((w) => w.code === "SNAPSHOT_NIEAKTUALNY");
@@ -114,6 +124,20 @@ export function EstymacjeView({
           Uwaga: saldo schodzi poniżej zera już w miesiącu{" "}
           <span className="font-semibold capitalize">{kpis.firstNegativePeriod}</span>.
         </div>
+      )}
+
+      {/* analiza AI (doradcza) */}
+      {aiEnabled && (
+        <AiPanel
+          horizon={horizon}
+          review={review}
+          applied={applied}
+          onReview={(r) => {
+            setReview(r);
+            setApplied(true);
+          }}
+          onAppliedChange={setApplied}
+        />
       )}
 
       {/* wykres */}

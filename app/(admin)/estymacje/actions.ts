@@ -6,11 +6,14 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import Anthropic from "@anthropic-ai/sdk";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { dateFromInput, parseMoneyToGr } from "@/lib/format";
-import { PLAN_EVENT_KINDS } from "@/lib/forecast";
+import { PLAN_EVENT_KINDS, buildForecast } from "@/lib/forecast";
+import { isAiEnabled, aiReviewForecast, type ForecastAiReview } from "@/lib/forecast-ai";
+import { loadForecastInput, type Horizon } from "./forecast-data";
 
 const PATH = "/estymacje";
 const PERIOD_RE = /^\d{4}-\d{2}$/;
@@ -123,4 +126,38 @@ export async function setNewBusinessAssumptionAction(value: string): Promise<Act
   });
   revalidatePath(PATH);
   return ok("Zapisano założenie nowego biznesu");
+}
+
+// ── Analiza AI (doradcza) ────────────────────────────────────────────
+
+export type AiForecastResult =
+  | { ok: true; review: ForecastAiReview }
+  | { ok: false; error: string };
+
+const HORIZONS: readonly number[] = [3, 6, 12];
+
+/**
+ * Uruchamia analizę AI dla wskazanego horyzontu. Serwer SAM odbudowuje wejście
+ * prognozy (nie ufa klientowi), liczy baseline i wysyła go do modelu. Zwraca
+ * korekty/ryzyka/komentarz — nakładane na baseline czystą funkcją po stronie
+ * klienta. Nic nie zapisuje do bazy.
+ */
+export async function aiForecastAction(horizon: number): Promise<AiForecastResult> {
+  await requireAdmin();
+  if (!isAiEnabled()) {
+    return { ok: false, error: "AI nie jest skonfigurowane (brak ANTHROPIC_API_KEY na serwerze)" };
+  }
+  const h: Horizon = (HORIZONS.includes(horizon) ? horizon : 6) as Horizon;
+  try {
+    const input = await loadForecastInput(h);
+    const baseline = buildForecast(input);
+    const review = await aiReviewForecast(baseline);
+    return { ok: true, review };
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) return { ok: false, error: "Błędny klucz API Anthropic" };
+    if (e instanceof Anthropic.RateLimitError) return { ok: false, error: "Przekroczono limit zapytań API — spróbuj później" };
+    if (e instanceof Anthropic.APIConnectionError) return { ok: false, error: "Brak połączenia z API Anthropic" };
+    if (e instanceof Anthropic.APIError) return { ok: false, error: `Błąd API Anthropic (${e.status ?? "?"})` };
+    return { ok: false, error: "Nieoczekiwany błąd analizy AI" };
+  }
 }
