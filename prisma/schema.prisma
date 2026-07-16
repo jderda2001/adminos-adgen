@@ -127,10 +127,11 @@ model InvoiceItem {
 // ── Koszty ───────────────────────────────────────────────────────────
 
 model CostCategory {
-  id       String  @id @default(cuid())
-  name     String  @unique
-  position Int     @default(0)
-  isSalary Boolean @default(false) // kategoria wynagrodzeń: rozliczana kosztem pracy z godzin, poza alokacją
+  id         String  @id @default(cuid())
+  name       String  @unique
+  position   Int     @default(0)
+  isSalary   Boolean @default(false) // kategoria wynagrodzeń: rozliczana kosztem pracy z godzin, poza alokacją
+  isDeferred Boolean @default(false) // koszt wewnętrzny/odłożony (zaliczki CIT/premie, oszczędności) — przelew na własne konto; NIE liczony jako koszt zewnętrzny w zysku/rentowności
 
   costs          Cost[]
   recurringCosts RecurringCost[]

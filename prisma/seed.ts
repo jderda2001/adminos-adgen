@@ -118,7 +118,7 @@ async function main() {
   const categories = new Map<string, string>();
   for (const [i, def] of DEFAULT_COST_CATEGORIES.entries()) {
     const cat = await db.costCategory.create({
-      data: { name: def.name, isSalary: def.isSalary, position: i },
+      data: { name: def.name, isSalary: def.isSalary, isDeferred: def.isDeferred ?? false, position: i },
     });
     categories.set(def.name, cat.id);
   }

@@ -23,9 +23,15 @@ import {
 import { computeVatFromNet } from "./calc";
 import { isVatRate } from "./types";
 
-// Filtry wspólne: przychody bez szkiców, koszty bez oczekujących na zatwierdzenie
+// Filtry wspólne: przychody bez szkiców; koszty bez oczekujących na zatwierdzenie
+// ORAZ bez kategorii odłożonych (isDeferred) — zaliczki CIT/premie, oszczędności
+// to koszty wewnętrzne (przelew na własne konto), nie liczą się do zysku ani
+// rentowności. Pozostają widoczne w rejestrze Kosztów.
 const REVENUE_WHERE = { status: { not: "DRAFT" } } as const;
-const COST_WHERE = { needsConfirmation: false } as const;
+const COST_WHERE = {
+  needsConfirmation: false,
+  category: { isDeferred: false },
+} as const;
 
 /**
  * Aktualizuje statusy faktur względem terminu płatności:

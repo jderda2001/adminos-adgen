@@ -122,13 +122,16 @@ export type SettingKey = keyof typeof SETTING_DEFAULTS;
 export const DEFAULT_COST_CATEGORIES: ReadonlyArray<{
   name: string;
   isSalary: boolean;
+  isDeferred?: boolean;
 }> = [
   { name: "Abonamenty", isSalary: false },
   { name: "Pozostałe wydatki operacyjne", isSalary: false },
   { name: "Wypłaty | Zarząd", isSalary: true },
   { name: "Wypłaty | Zespół", isSalary: true },
   { name: "Podwykonawcy", isSalary: false },
-  { name: "Oszczędności", isSalary: false },
+  // odłożone środki (koszt wewnętrzny — przelew na własne konto, poza zyskiem):
+  { name: "Zaliczki na CIT / premie", isSalary: false, isDeferred: true },
+  { name: "Oszczędności", isSalary: false, isDeferred: true },
   { name: "Inne", isSalary: false },
 ];
 
