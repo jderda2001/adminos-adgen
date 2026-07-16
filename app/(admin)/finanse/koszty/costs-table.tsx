@@ -12,6 +12,7 @@ import {
   Plus,
   Repeat,
   Trash2,
+  Upload,
   Wallet,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -388,23 +389,41 @@ export function CostsTable({
           placeholder="Szukaj: dostawca, nr dokumentu…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 w-60"
+          className="h-8 min-w-[10rem] flex-1"
         />
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <a href={`/api/eksport/koszty?${searchParams.toString()}`}>
-              <Download className="size-4" /> Eksport CSV
-            </a>
-          </Button>
-          <CostImportDialog />
-          <RecurringCostsDialog
-            templates={templates}
-            trigger={
-              <Button variant="outline" size="sm">
-                <Repeat className="size-4" /> Koszty cykliczne
-              </Button>
-            }
-          />
+        <div className="ml-auto flex items-center gap-1">
+          {/* akcje poboczne — ikony z tooltipami, zgrupowane, żeby nie tłoczyć paska */}
+          <div className="flex items-center gap-0.5 rounded-lg border bg-card p-0.5">
+            <Button variant="ghost" size="icon-sm" asChild>
+              <a
+                href={`/api/eksport/koszty?${searchParams.toString()}`}
+                title="Eksport CSV"
+                aria-label="Eksport CSV"
+              >
+                <Download className="size-4" />
+              </a>
+            </Button>
+            <CostImportDialog
+              trigger={
+                <Button variant="ghost" size="icon-sm" title="Importuj CSV" aria-label="Importuj CSV">
+                  <Upload className="size-4" />
+                </Button>
+              }
+            />
+            <RecurringCostsDialog
+              templates={templates}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Koszty cykliczne"
+                  aria-label="Koszty cykliczne"
+                >
+                  <Repeat className="size-4" />
+                </Button>
+              }
+            />
+          </div>
           <CostFormDialog
             categories={categories}
             clients={clients}
