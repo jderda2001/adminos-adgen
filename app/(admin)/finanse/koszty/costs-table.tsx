@@ -131,6 +131,45 @@ function useCostPatch() {
   return { pending, run };
 }
 
+type CostStatus = "NONE" | "APPROVED" | "DELAYED" | "PAID";
+function costStatus(c: CostRow): CostStatus {
+  if (c.paid) return "PAID";
+  if (c.delayed) return "DELAYED";
+  if (c.approvedForPayment) return "APPROVED";
+  return "NONE";
+}
+const STATUS_ORDER: CostStatus[] = ["NONE", "APPROVED", "DELAYED", "PAID"];
+function statusTone(s: CostStatus) {
+  return costTone(s === "PAID", s === "APPROVED", s === "DELAYED");
+}
+
+/** Status płatności — dropdown edytowalny wprost z wiersza */
+function InlineStatus({ cost }: { cost: CostRow }) {
+  const { pending, run } = useCostPatch();
+  const status = costStatus(cost);
+  return (
+    <Select
+      value={status}
+      disabled={pending}
+      onValueChange={(v) => v !== status && run(cost.id, { status: v as CostStatus })}
+    >
+      <SelectTrigger
+        size="sm"
+        className="h-7 w-full border-transparent bg-transparent px-1 shadow-none hover:bg-muted/60 focus:border-ring"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {STATUS_ORDER.map((s) => (
+          <SelectItem key={s} value={s}>
+            <StatusBadge tone={statusTone(s)}>{COST_APPROVAL_LABELS[s]}</StatusBadge>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 /** Kategoria — kolorowy dropdown edytowalny wprost z wiersza */
 function InlineCategory({
   cost,
@@ -382,14 +421,7 @@ export function CostsTable({
       {
         id: "approval",
         header: "Status",
-        cell: ({ row }) => {
-          const c = row.original;
-          return (
-            <StatusBadge tone={costTone(c.paid, c.approvedForPayment, c.delayed)}>
-              {costApprovalLabel(c)}
-            </StatusBadge>
-          );
-        },
+        cell: ({ row }) => <InlineStatus cost={row.original} />,
       },
       {
         accessorKey: "supplierName",

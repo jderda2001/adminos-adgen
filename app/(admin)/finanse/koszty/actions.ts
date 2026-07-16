@@ -364,6 +364,7 @@ export async function patchCostAction(
     supplierName?: string;
     dueDate?: string | null;
     netGr?: number;
+    status?: "NONE" | "APPROVED" | "DELAYED" | "PAID";
   }
 ): Promise<ActionResult> {
   await requireAdmin();
@@ -377,7 +378,25 @@ export async function patchCostAction(
     netGr?: number;
     vatGr?: number;
     grossGr?: number;
+    paid?: boolean;
+    paidDate?: Date | null;
+    approvedForPayment?: boolean;
+    delayed?: boolean;
   } = {};
+
+  // status płatności (Brak działań / Można płacić / Opóźniamy / Opłacone)
+  if (patch.status !== undefined) {
+    if (patch.status === "PAID") {
+      data.paid = true;
+      data.paidDate = todayUTC();
+      data.delayed = false;
+    } else {
+      data.paid = false;
+      data.paidDate = null;
+      data.approvedForPayment = patch.status === "APPROVED";
+      data.delayed = patch.status === "DELAYED";
+    }
+  }
 
   if (patch.categoryId !== undefined) {
     const cat = await db.costCategory.findUnique({ where: { id: patch.categoryId } });
@@ -413,6 +432,7 @@ export async function patchCostAction(
   revalidatePath(KOSZTY_PATH);
   revalidatePath(RW_PATH);
   revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
   return ok("Zapisano");
 }
 
