@@ -101,13 +101,14 @@ export function ClientFormDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {client ? "Edytuj klienta" : "Nowy klient"}
           </DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1">
           <div className="space-y-2">
             <Label htmlFor="name">Nazwa *</Label>
             <Input
@@ -351,7 +352,8 @@ export function ClientFormDialog({
               defaultValue={client?.notes ?? ""}
             />
           </div>
-          <DialogFooter>
+          </div>
+          <DialogFooter className="mt-4">
             <Button
               type="button"
               variant="outline"
