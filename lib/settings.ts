@@ -48,3 +48,12 @@ export async function getSalaryCategoryIds(): Promise<Set<string>> {
   });
   return new Set(cats.map((c) => c.id));
 }
+
+/** Kategorie budżetu reklamowego (isAdBudget) — poza direct/alokacją w rentowności */
+export async function getAdBudgetCategoryIds(): Promise<Set<string>> {
+  const cats = await db.costCategory.findMany({
+    where: { isAdBudget: true },
+    select: { id: true },
+  });
+  return new Set(cats.map((c) => c.id));
+}

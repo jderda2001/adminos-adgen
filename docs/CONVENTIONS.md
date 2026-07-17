@@ -108,6 +108,23 @@ Cały interfejs PO POLSKU. Waluta PLN, kwoty w groszach (Int), formaty polskie.
   do rozliczenia zespołu.
 - **RevenuePlanNote** (clientId, period „RRRR-MM", note) — miesięczna uwaga do
   klienta w planie przychodów (unique [clientId, period]).
+- **Ekonomika leadów (moduł Leady, `/leady`)**: `Brand` (marki wewnętrzne,
+  CRUD w module), `LeadCampaignMonth` (period „RRRR-MM" × brand × wertykal:
+  spendGr netto + leadsCount z Meta Ads Manager → CPL; unique [period, brandId,
+  vertical]), `LeadDelivery` (dostawy leadów do klientów; brandId null = mix →
+  średnia ważona CPL wertykalu). Silnik: `lib/leads.ts` (`buildLeadCosts`).
+  Kategorie kosztów mają flagę `isAdBudget` — przelewy do Mety są poza kosztami
+  bezpośrednimi i pulą alokacji; klientom przypisywany jest koszt leadów
+  (leady × CPL), reszta = „nieprzypisane wydatki reklamowe". Tożsamość pionowa
+  rentowności (V2): Σ zysków klientów − niealokowane − niepokryte wynagrodzenia
+  − nieprzypisany spend = zysk firmy. `computeProfitability` przyjmuje
+  opcjonalne `adBudgetCategoryIds` i `leadCosts`; `getAdBudgetCategoryIds()`
+  w `lib/settings.ts`. Wertykale = `LEAD_CATEGORIES`. Nazwy marek to dane
+  biznesowe poza repo: `config/brands.json` (gitignore, wzór
+  `config/brands.example.json`), ładowane przez `loadDefaultBrands()`
+  (`lib/brands-config.ts`) — jak `rw-people.json`. Skrypty
+  `prisma/ensure-cost-categories.ts` i `prisma/ensure-brands.ts`
+  (idempotentne, uruchamiane w deploy/update.sh; brak configu → brak marek).
 - Polska odmiana liczebników: `pluralPl(n, one, few, many)` z `lib/format.ts`
   (np. `pluralPl(n, "faktura", "faktury", "faktur")`). Używaj wszędzie zamiast
   ręcznego `n === 1 ? … : …`.

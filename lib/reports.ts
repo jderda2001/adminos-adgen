@@ -15,13 +15,28 @@ import {
   type VatSummary,
 } from "./calc";
 import { todayUTC } from "./format";
-import { lastMonths, lastMonthsRange, monthKey, type Period } from "./periods";
 import {
+  lastMonths,
+  lastMonthsRange,
+  monthBounds,
+  monthKey,
+  monthKeysInRange,
+  nextMonthKey,
+  type Period,
+} from "./periods";
+import {
+  getAdBudgetCategoryIds,
   getSalaryCategoryIds,
   isAllocationEnabled,
 } from "./settings";
 import { computeVatFromNet } from "./calc";
-import { isVatRate } from "./types";
+import { isVatRate, type LeadCostSource } from "./types";
+import {
+  buildLeadCosts,
+  cplGr,
+  type DeliveryCostRow,
+  type LeadWarning,
+} from "./leads";
 
 // Filtry wspólne: przychody bez szkiców; koszty bez oczekujących na zatwierdzenie
 // ORAZ bez kategorii odłożonych (isDeferred) — zaliczki CIT/premie, oszczędności
@@ -180,6 +195,8 @@ export async function getCostStructure(
 export interface ProfitabilityWithNames extends ProfitabilityResult {
   clientNames: Map<string, string>;
   allocationEnabled: boolean;
+  /** ostrzeżenia wyceny leadów (brak kampanii itp.) — notka w UI z linkiem do /leady */
+  leadWarnings: LeadWarning[];
 }
 
 /**
@@ -189,25 +206,47 @@ export interface ProfitabilityWithNames extends ProfitabilityResult {
 export async function getClientProfitability(
   period: Period
 ): Promise<ProfitabilityWithNames> {
-  const [invoices, costs, entries, users, clients, salaryCategoryIds, allocationEnabled] =
-    await Promise.all([
-      db.invoice.findMany({
-        where: { ...REVENUE_WHERE, saleDate: { gte: period.from, lt: period.to } },
-        select: { clientId: true, netGr: true },
-      }),
-      db.cost.findMany({
-        where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
-        select: { clientId: true, categoryId: true, netGr: true },
-      }),
-      db.timeEntry.findMany({
-        where: { date: { gte: period.from, lt: period.to } },
-        select: { userId: true, clientId: true, minutes: true, date: true },
-      }),
-      db.user.findMany({ select: { id: true, rates: true } }),
-      db.client.findMany({ select: { id: true, name: true } }),
-      getSalaryCategoryIds(),
-      isAllocationEnabled(),
-    ]);
+  // koszt leadów liczony dla PEŁNYCH miesięcy przecinających okres
+  const leadMonths = monthKeysInRange(period.from, period.to);
+
+  const [
+    invoices,
+    costs,
+    entries,
+    users,
+    clients,
+    salaryCategoryIds,
+    allocationEnabled,
+    adBudgetCategoryIds,
+    deliveries,
+    campaigns,
+  ] = await Promise.all([
+    db.invoice.findMany({
+      where: { ...REVENUE_WHERE, saleDate: { gte: period.from, lt: period.to } },
+      select: { clientId: true, netGr: true },
+    }),
+    db.cost.findMany({
+      where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
+      select: { clientId: true, categoryId: true, netGr: true },
+    }),
+    db.timeEntry.findMany({
+      where: { date: { gte: period.from, lt: period.to } },
+      select: { userId: true, clientId: true, minutes: true, date: true },
+    }),
+    db.user.findMany({ select: { id: true, rates: true } }),
+    db.client.findMany({ select: { id: true, name: true } }),
+    getSalaryCategoryIds(),
+    isAllocationEnabled(),
+    getAdBudgetCategoryIds(),
+    db.leadDelivery.findMany({
+      where: { period: { in: leadMonths } },
+      select: { id: true, period: true, clientId: true, vertical: true, brandId: true, leadsCount: true },
+    }),
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: leadMonths } },
+      select: { brandId: true, period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
+  ]);
 
   // koszt pracy per wpis wg stawki obowiązującej w dniu wpisu
   const ratesByUser = new Map(users.map((u) => [u.id, u.rates]));
@@ -220,18 +259,23 @@ export async function getClientProfitability(
     };
   });
 
+  const leadCostsResult = buildLeadCosts(deliveries, campaigns);
+
   const result = computeProfitability({
     revenues: invoices.map((i) => ({ clientId: i.clientId, netGr: i.netGr })),
     costs,
     labor,
     salaryCategoryIds,
     allocationEnabled,
+    adBudgetCategoryIds,
+    leadCosts: leadCostsResult.perClient,
   });
 
   return {
     ...result,
     clientNames: new Map(clients.map((c) => [c.id, c.name])),
     allocationEnabled,
+    leadWarnings: leadCostsResult.warnings,
   };
 }
 
@@ -241,7 +285,8 @@ export async function getClientMonthlyProfit(
   n = 12
 ): Promise<MonthlyPoint[]> {
   const { from, to } = lastMonthsRange(n);
-  const [invoices, costs, entries, users] = await Promise.all([
+  const months = lastMonths(n);
+  const [invoices, costs, entries, users, deliveries, campaigns] = await Promise.all([
     db.invoice.findMany({
       where: { ...REVENUE_WHERE, clientId, saleDate: { gte: from, lt: to } },
       select: { saleDate: true, netGr: true },
@@ -255,9 +300,20 @@ export async function getClientMonthlyProfit(
       select: { userId: true, minutes: true, date: true },
     }),
     db.user.findMany({ select: { id: true, rates: true } }),
+    db.leadDelivery.findMany({
+      where: { clientId, period: { in: months } },
+      select: { id: true, period: true, clientId: true, vertical: true, brandId: true, leadsCount: true },
+    }),
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: months } },
+      select: { brandId: true, period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
   ]);
 
-  const salaryCategoryIds = await getSalaryCategoryIds();
+  const [salaryCategoryIds, adBudgetCategoryIds] = await Promise.all([
+    getSalaryCategoryIds(),
+    getAdBudgetCategoryIds(),
+  ]);
   const ratesByUser = new Map(users.map((u) => [u.id, u.rates]));
 
   const revenueByMonth = new Map<string, number>();
@@ -268,6 +324,9 @@ export async function getClientMonthlyProfit(
   const costsByMonth = new Map<string, number>();
   for (const c of costs) {
     if (salaryCategoryIds.has(c.categoryId)) continue;
+    // przelewy budżetu reklamowego przypisane klientowi nie są jego kosztem —
+    // koszt leadów doliczany jest niżej z dostaw × CPL (spójnie z rentownością)
+    if (adBudgetCategoryIds.has(c.categoryId)) continue;
     const key = monthKey(c.docDate);
     costsByMonth.set(key, (costsByMonth.get(key) ?? 0) + c.netGr);
   }
@@ -278,6 +337,10 @@ export async function getClientMonthlyProfit(
       key,
       (costsByMonth.get(key) ?? 0) + laborCostGr(e.minutes, rate)
     );
+  }
+  // koszt leadów per miesiąc (dostawy klienta × CPL kampanii)
+  for (const d of buildLeadCosts(deliveries, campaigns).perDelivery) {
+    costsByMonth.set(d.period, (costsByMonth.get(d.period) ?? 0) + d.costGr);
   }
 
   return lastMonths(n).map((month) => {
@@ -294,17 +357,177 @@ export async function getClientMonthlyProfit(
   });
 }
 
+// ── Ekonomika leadów (moduł Leady) ───────────────────────────────────
+
+export interface LeadMonthData {
+  campaigns: {
+    id: string;
+    brandId: string;
+    brandName: string;
+    vertical: string;
+    spendGr: number;
+    leadsCount: number;
+    cplGr: number | null;
+    note: string | null;
+  }[];
+  deliveries: {
+    id: string;
+    clientId: string;
+    clientName: string;
+    vertical: string;
+    brandId: string | null;
+    brandName: string | null;
+    leadsCount: number;
+    costGr: number;
+    cplGr: number | null;
+    source: LeadCostSource;
+    note: string | null;
+  }[];
+  totals: {
+    spendGr: number;
+    campaignLeads: number;
+    avgCplGr: number | null;
+    deliveredLeads: number;
+    assignedCostGr: number;
+  };
+  /** Σ kosztów (COST_WHERE) w kategoriach budżetu reklamowego w tym miesiącu */
+  bookedAdCostsGr: number;
+  warnings: LeadWarning[];
+}
+
+/** Dane miesiąca dla modułu Leady: kampanie z CPL, dostawy z kosztem, uzgodnienie. */
+export async function getLeadMonthData(month: string): Promise<LeadMonthData> {
+  const bounds = monthBounds(month);
+  const [campaignRows, deliveryRows, brands, clients, adBudgetCategoryIds] =
+    await Promise.all([
+      db.leadCampaignMonth.findMany({
+        where: { period: month },
+        orderBy: [{ vertical: "asc" }],
+      }),
+      db.leadDelivery.findMany({
+        where: { period: month },
+        orderBy: [{ createdAt: "asc" }],
+      }),
+      db.brand.findMany({ select: { id: true, name: true } }),
+      db.client.findMany({ select: { id: true, name: true } }),
+      getAdBudgetCategoryIds(),
+    ]);
+
+  const bookedAgg = await db.cost.aggregate({
+    where: {
+      ...COST_WHERE,
+      categoryId: { in: [...adBudgetCategoryIds] },
+      docDate: { gte: bounds.from, lt: bounds.to },
+    },
+    _sum: { netGr: true },
+  });
+
+  const brandName = new Map(brands.map((b) => [b.id, b.name]));
+  const clientName = new Map(clients.map((c) => [c.id, c.name]));
+
+  const result = buildLeadCosts(
+    deliveryRows.map((d) => ({
+      id: d.id,
+      period: d.period,
+      clientId: d.clientId,
+      vertical: d.vertical,
+      brandId: d.brandId,
+      leadsCount: d.leadsCount,
+    })),
+    campaignRows.map((c) => ({
+      brandId: c.brandId,
+      period: c.period,
+      vertical: c.vertical,
+      spendGr: c.spendGr,
+      leadsCount: c.leadsCount,
+    }))
+  );
+  const costByDelivery = new Map(result.perDelivery.map((d) => [d.deliveryId, d]));
+
+  const campaigns = campaignRows
+    .map((c) => ({
+      id: c.id,
+      brandId: c.brandId,
+      brandName: brandName.get(c.brandId) ?? "?",
+      vertical: c.vertical,
+      spendGr: c.spendGr,
+      leadsCount: c.leadsCount,
+      cplGr: cplGr(c.spendGr, c.leadsCount),
+      note: c.note,
+    }))
+    .sort((a, b) => a.brandName.localeCompare(b.brandName, "pl") || a.vertical.localeCompare(b.vertical, "pl"));
+
+  const deliveries = deliveryRows.map((d) => {
+    const cost = costByDelivery.get(d.id);
+    return {
+      id: d.id,
+      clientId: d.clientId,
+      clientName: clientName.get(d.clientId) ?? "?",
+      vertical: d.vertical,
+      brandId: d.brandId,
+      brandName: d.brandId ? (brandName.get(d.brandId) ?? "?") : null,
+      leadsCount: d.leadsCount,
+      costGr: cost?.costGr ?? 0,
+      cplGr: cost?.cplGr ?? null,
+      source: (cost?.source ?? "BRAK_KAMPANII") as LeadCostSource,
+      note: d.note,
+    };
+  });
+
+  const spendGr = campaigns.reduce((s, c) => s + c.spendGr, 0);
+  const campaignLeads = campaigns.reduce((s, c) => s + c.leadsCount, 0);
+  return {
+    campaigns,
+    deliveries,
+    totals: {
+      spendGr,
+      campaignLeads,
+      avgCplGr: cplGr(spendGr, campaignLeads),
+      deliveredLeads: deliveries.reduce((s, d) => s + d.leadsCount, 0),
+      assignedCostGr: deliveries.reduce((s, d) => s + d.costGr, 0),
+    },
+    bookedAdCostsGr: bookedAgg._sum.netGr ?? 0,
+    warnings: result.warnings,
+  };
+}
+
+export interface ClientLeadCostsRow extends DeliveryCostRow {
+  brandName: string | null;
+}
+
+/** Dostawy leadów klienta z kosztami w okresie — sekcja na karcie klienta. */
+export async function getClientLeadCosts(
+  clientId: string,
+  period: Period
+): Promise<{ rows: ClientLeadCostsRow[]; totalGr: number; totalLeads: number }> {
+  const months = monthKeysInRange(period.from, period.to);
+  const [deliveries, campaigns, brands] = await Promise.all([
+    db.leadDelivery.findMany({
+      where: { clientId, period: { in: months } },
+      select: { id: true, period: true, clientId: true, vertical: true, brandId: true, leadsCount: true },
+    }),
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: months } },
+      select: { brandId: true, period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
+    db.brand.findMany({ select: { id: true, name: true } }),
+  ]);
+  const brandName = new Map(brands.map((b) => [b.id, b.name]));
+  const { perDelivery } = buildLeadCosts(deliveries, campaigns);
+  const rows = perDelivery
+    .map((d) => ({ ...d, brandName: d.brandId ? (brandName.get(d.brandId) ?? "?") : null }))
+    .sort((a, b) => a.period.localeCompare(b.period) || a.vertical.localeCompare(b.vertical, "pl"));
+  return {
+    rows,
+    totalGr: rows.reduce((s, r) => s + r.costGr, 0),
+    totalLeads: rows.reduce((s, r) => s + r.leadsCount, 0),
+  };
+}
+
 // ── Koszty cykliczne — leniwe generowanie miesięcznych kopii ────────
 
 // Ile najdalej wstecz dogenerowywać pominięte miesiące (miesiące bez wizyty w module)
 const RECURRING_BACKFILL_LIMIT = 12;
-
-/** Kolejny miesiąc po kluczu "RRRR-MM" */
-function nextMonthKey(key: string): string {
-  const [y, m] = key.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m, 1)); // m jest 1-indeksowane → to już następny miesiąc
-  return monthKey(d);
-}
 
 /**
  * Tworzy kopie „do potwierdzenia" dla wszystkich aktywnych szablonów kosztów

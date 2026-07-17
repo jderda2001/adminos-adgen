@@ -100,6 +100,12 @@ export interface LaborByClient {
   laborGr: number;
 }
 
+/** Koszt leadów przypisany klientowi (z lib/leads.buildLeadCosts) */
+export interface LeadCostByClient {
+  clientId: string;
+  leadCostGr: number;
+}
+
 export interface ClientProfitRow {
   clientId: string;
   revenueGr: number;
@@ -107,6 +113,8 @@ export interface ClientProfitRow {
   laborGr: number;
   minutes: number;
   allocationGr: number;
+  /** koszt leadów (leady × CPL z modułu Leady); 0 gdy nieużywane */
+  leadCostGr: number;
   profitGr: number;
   /** zysk / przychody; null gdy przychody = 0 */
   marginFraction: number | null;
@@ -116,7 +124,7 @@ export interface ClientProfitRow {
 
 export interface ProfitabilityResult {
   rows: ClientProfitRow[];
-  /** pula alokacji: koszty ogólne bez kategorii wynagrodzeń */
+  /** pula alokacji: koszty ogólne bez kategorii wynagrodzeń i budżetu reklamowego */
   generalPoolGr: number;
   /** suma alokacji przypisanej klientom */
   allocatedGr: number;
@@ -128,6 +136,12 @@ export interface ProfitabilityResult {
   laborTotalGr: number;
   /** wynagrodzenia niepokryte godzinami: salaryCostsGr − laborTotalGr */
   salariesNotCoveredGr: number;
+  /** koszty z kategorii budżetu reklamowego (ogólne I przypisane do klientów) */
+  adSpendBookedGr: number;
+  /** suma kosztów leadów przypisanych klientom (wejście leadCosts) */
+  leadCostsTotalGr: number;
+  /** nieprzypisane wydatki reklamowe: adSpendBookedGr − leadCostsTotalGr (może być ujemne) */
+  unassignedAdSpendGr: number;
   /** zysk firmy: przychody − wszystkie koszty (jak na Dashboardzie) */
   companyProfitGr: number;
   /** suma zysków klientów */
@@ -138,9 +152,26 @@ export interface ProfitabilityResult {
  * Rentowność per klient + uzgodnienie z zyskiem firmy.
  *
  * Koszty bezpośrednie klienta = koszty z przypisanym clientId, NIEZALEŻNIE od kategorii,
- * z wyjątkiem kategorii wynagrodzeń (pensje rozliczane są wyłącznie kosztem pracy z godzin).
+ * z wyjątkiem kategorii wynagrodzeń (pensje rozliczane są wyłącznie kosztem pracy z godzin)
+ * oraz kategorii budżetu reklamowego (zastępuje je imienny koszt leadów — patrz niżej).
  * Kategorii wynagrodzeń może być kilka (np. "Wypłaty | Zarząd" i "Wypłaty | Zespół").
- * Alokacja: pula kosztów ogólnych (bez wynagrodzeń) × udział klienta w przychodach okresu.
+ * Alokacja: pula kosztów ogólnych (bez wynagrodzeń i budżetu reklamowego) × udział
+ * klienta w przychodach okresu.
+ *
+ * Budżet reklamowy (adBudgetCategoryIds): przelewy do Mety NIE wchodzą do kosztów
+ * bezpośrednich ani do puli alokacji — klientom przypisuje się koszt leadów
+ * (leadCosts, z modułu Leady: leady × CPL kampanii). Reszta trafia do pozycji
+ * „nieprzypisane wydatki reklamowe".
+ *
+ * TOŻSAMOŚĆ PIONOWA (dokładna co do grosza):
+ *   suma zysków klientów
+ *     − koszty ogólne niealokowane
+ *     − wynagrodzenia niepokryte godzinami
+ *     − nieprzypisane wydatki reklamowe (booked − przypisane leadom)
+ *   = zysk firmy (przychody − wszystkie koszty)
+ * Dowód: Σprofit = R − D − L − Alloc − LC; po odjęciu (Pool−Alloc) + (Sal−L)
+ * + (Booked−LC) koszty leadów LC się skracają → R − D − Pool − Sal − Booked
+ * = R − wszystkie koszty. Zaokrąglenia per-dostawa absorbuje unassignedAdSpendGr.
  */
 export function computeProfitability(input: {
   revenues: RevenueByClient[];
@@ -148,8 +179,20 @@ export function computeProfitability(input: {
   labor: LaborByClient[];
   salaryCategoryIds: ReadonlySet<string>;
   allocationEnabled: boolean;
+  /** kategorie budżetu reklamowego — wyłączone z direct/puli; zastępuje je leadCosts */
+  adBudgetCategoryIds?: ReadonlySet<string>;
+  /** koszt leadów per klient; profit = przychody − bezpośrednie − praca − alokacja − leady */
+  leadCosts?: readonly LeadCostByClient[];
 }): ProfitabilityResult {
-  const { revenues, costs, labor, salaryCategoryIds, allocationEnabled } = input;
+  const {
+    revenues,
+    costs,
+    labor,
+    salaryCategoryIds,
+    allocationEnabled,
+    adBudgetCategoryIds = new Set<string>(),
+    leadCosts = [],
+  } = input;
 
   const revenueMap = new Map<string, number>();
   for (const r of revenues) {
@@ -157,6 +200,7 @@ export function computeProfitability(input: {
   }
 
   let salaryCostsGr = 0;
+  let adSpendBookedGr = 0;
   let generalPoolGr = 0;
   const directMap = new Map<string, number>();
   let totalCostsGr = 0;
@@ -167,11 +211,24 @@ export function computeProfitability(input: {
       salaryCostsGr += c.netGr;
       continue; // wynagrodzenia: nie wchodzą ani do kosztów bezpośrednich, ani do puli alokacji
     }
+    if (adBudgetCategoryIds.has(c.categoryId)) {
+      // budżet reklamowy: poza direct/pulą NIEZALEŻNIE od clientId —
+      // klientom przypisuje się koszt leadów (leadCosts), nie przelewy do Mety
+      adSpendBookedGr += c.netGr;
+      continue;
+    }
     if (c.clientId === null) {
       generalPoolGr += c.netGr;
     } else {
       directMap.set(c.clientId, (directMap.get(c.clientId) ?? 0) + c.netGr);
     }
+  }
+
+  const leadCostMap = new Map<string, number>();
+  let leadCostsTotalGr = 0;
+  for (const lc of leadCosts) {
+    leadCostMap.set(lc.clientId, (leadCostMap.get(lc.clientId) ?? 0) + lc.leadCostGr);
+    leadCostsTotalGr += lc.leadCostGr;
   }
 
   const laborMap = new Map<string, { minutes: number; laborGr: number }>();
@@ -189,6 +246,7 @@ export function computeProfitability(input: {
     ...revenueMap.keys(),
     ...directMap.keys(),
     ...laborMap.keys(),
+    ...leadCostMap.keys(),
   ]);
 
   const totalRevenueGr = [...revenueMap.values()].reduce((a, b) => a + b, 0);
@@ -206,8 +264,9 @@ export function computeProfitability(input: {
     }
     allocatedGr += allocationGr;
 
+    const leadCostGr = leadCostMap.get(clientId) ?? 0;
     const profitGr =
-      revenueGr - directCostsGr - laborEntry.laborGr - allocationGr;
+      revenueGr - directCostsGr - laborEntry.laborGr - allocationGr - leadCostGr;
 
     rows.push({
       clientId,
@@ -216,6 +275,7 @@ export function computeProfitability(input: {
       laborGr: laborEntry.laborGr,
       minutes: laborEntry.minutes,
       allocationGr,
+      leadCostGr,
       profitGr,
       marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
       effectiveRateGr:
@@ -227,10 +287,11 @@ export function computeProfitability(input: {
 
   rows.sort((a, b) => b.profitGr - a.profitGr);
 
-  // niealokowana reszta liczona różnicą — pochłania grosze z zaokrągleń,
-  // dzięki czemu tożsamość pionowa zachodzi co do grosza
+  // pozycje „niealokowane/niepokryte/nieprzypisane" liczone różnicą — pochłaniają
+  // grosze z zaokrągleń, dzięki czemu tożsamość pionowa zachodzi co do grosza
   const unallocatedGeneralGr = generalPoolGr - allocatedGr;
   const salariesNotCoveredGr = salaryCostsGr - laborTotalGr;
+  const unassignedAdSpendGr = adSpendBookedGr - leadCostsTotalGr;
   const companyProfitGr = totalRevenueGr - totalCostsGr;
   const clientProfitSumGr = rows.reduce((a, r) => a + r.profitGr, 0);
 
@@ -242,6 +303,9 @@ export function computeProfitability(input: {
     salaryCostsGr,
     laborTotalGr,
     salariesNotCoveredGr,
+    adSpendBookedGr,
+    leadCostsTotalGr,
+    unassignedAdSpendGr,
     companyProfitGr,
     clientProfitSumGr,
   };

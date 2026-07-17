@@ -26,6 +26,7 @@ export default async function SettingsPage() {
     costsCount: c._count.costs,
     recurringCount: c._count.recurringCosts,
     isSalary: c.isSalary,
+    isAdBudget: c.isAdBudget,
   }));
 
   return (

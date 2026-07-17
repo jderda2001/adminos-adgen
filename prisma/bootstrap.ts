@@ -19,7 +19,13 @@ async function main() {
     const cat = DEFAULT_COST_CATEGORIES[i];
     await db.costCategory.upsert({
       where: { name: cat.name },
-      create: { name: cat.name, isSalary: cat.isSalary, position: i },
+      create: {
+        name: cat.name,
+        isSalary: cat.isSalary,
+        isDeferred: cat.isDeferred ?? false,
+        isAdBudget: cat.isAdBudget ?? false,
+        position: i,
+      },
       update: {}, // istniejących nie nadpisujemy (admin mógł je zmienić)
     });
   }

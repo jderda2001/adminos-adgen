@@ -109,3 +109,27 @@ export function monthBounds(key: string): { from: Date; to: Date } {
   const [y, m] = key.split("-").map(Number);
   return { from: utc(y, m - 1, 1), to: utc(y, m, 1) };
 }
+
+/** Klucz następnego miesiąca po "RRRR-MM" */
+export function nextMonthKey(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return monthKey(new Date(Date.UTC(y, m, 1))); // m 1-indeksowane → to już następny miesiąc
+}
+
+/**
+ * Klucze "RRRR-MM" wszystkich miesięcy PRZECINAJĄCYCH zakres [from, to) —
+ * włącznie z częściowymi. Dla okresów miesiac/kwartal/rok pokrywa się
+ * dokładnie z miesiącami okresu. Używane m.in. do doliczania miesięcznych
+ * kosztów leadów w rentowności.
+ */
+export function monthKeysInRange(from: Date, to: Date): string[] {
+  const result: string[] = [];
+  if (!(from < to)) return result;
+  let key = monthKey(from);
+  // miesiąc wchodzi, gdy jego początek < to (początek pierwszego zawsze ≤ from < to)
+  while (monthBounds(key).from < to) {
+    result.push(key);
+    key = nextMonthKey(key);
+  }
+  return result;
+}

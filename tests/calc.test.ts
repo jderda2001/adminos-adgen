@@ -415,3 +415,148 @@ describe("computeProfitability", () => {
     expectVerticalIdentity(r);
   });
 });
+
+// ── Budżet reklamowy + koszt leadów (moduł Leady) ────────────────────
+
+/** Tożsamość pionowa V2 — z pozycją nieprzypisanych wydatków reklamowych */
+function expectVerticalIdentityV2(r: ReturnType<typeof computeProfitability>) {
+  expect(
+    r.clientProfitSumGr -
+      r.unallocatedGeneralGr -
+      r.salariesNotCoveredGr -
+      r.unassignedAdSpendGr
+  ).toBe(r.companyProfitGr);
+}
+
+describe("computeProfitability — budżet reklamowy i koszt leadów", () => {
+  const SALARY = "kat-wynagrodzenia";
+  const ADBUDGET = "kat-budzet-reklamowy";
+
+  it("f) Pełne przypisanie: pełne przypisanie — booked 12 900 zł, leady 12 000 + 900, unassigned 0", () => {
+    const r = computeProfitability({
+      revenues: [
+        { clientId: "clientA", netGr: 2_000_000 },
+        { clientId: "clientB", netGr: 200_000 },
+      ],
+      costs: [{ clientId: null, categoryId: ADBUDGET, netGr: 1_290_000 }],
+      labor: [],
+      salaryCategoryIds: new Set([SALARY]),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set([ADBUDGET]),
+      leadCosts: [
+        { clientId: "clientA", leadCostGr: 1_200_000 },
+        { clientId: "clientB", leadCostGr: 90_000 },
+      ],
+    });
+
+    // przelew do Mety poza pulą alokacji i poza direct
+    expect(r.generalPoolGr).toBe(0);
+    expect(r.adSpendBookedGr).toBe(1_290_000);
+    expect(r.leadCostsTotalGr).toBe(1_290_000);
+    expect(r.unassignedAdSpendGr).toBe(0);
+
+    const v = r.rows.find((x) => x.clientId === "clientA")!;
+    const b = r.rows.find((x) => x.clientId === "clientB")!;
+    expect(v.leadCostGr).toBe(1_200_000);
+    expect(v.directCostsGr).toBe(0);
+    expect(v.profitGr).toBe(2_000_000 - 1_200_000); // 800 000
+    expect(b.profitGr).toBe(200_000 - 90_000); // 110 000
+
+    expect(r.companyProfitGr).toBe(2_200_000 - 1_290_000);
+    expectVerticalIdentityV2(r);
+  });
+
+  it("g) częściowe przypisanie: unassigned = booked − przypisane (leady niesprzedane)", () => {
+    const r = computeProfitability({
+      revenues: [{ clientId: "clientA", netGr: 2_000_000 }],
+      costs: [{ clientId: null, categoryId: ADBUDGET, netGr: 1_290_000 }],
+      labor: [],
+      salaryCategoryIds: new Set<string>(),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set([ADBUDGET]),
+      leadCosts: [{ clientId: "clientA", leadCostGr: 1_200_000 }],
+    });
+    expect(r.unassignedAdSpendGr).toBe(90_000);
+    expectVerticalIdentityV2(r);
+  });
+
+  it("h) przypisanie > booked → unassigned ujemny, tożsamość dalej dokładna", () => {
+    const r = computeProfitability({
+      revenues: [{ clientId: "clientA", netGr: 2_000_000 }],
+      costs: [{ clientId: null, categoryId: ADBUDGET, netGr: 1_000_000 }],
+      labor: [],
+      salaryCategoryIds: new Set<string>(),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set([ADBUDGET]),
+      leadCosts: [{ clientId: "clientA", leadCostGr: 1_200_000 }],
+    });
+    expect(r.unassignedAdSpendGr).toBe(-200_000);
+    expectVerticalIdentityV2(r);
+  });
+
+  it("i) koszt adBudget przypisany do klienta → do booked, NIE do kosztów bezpośrednich", () => {
+    const r = computeProfitability({
+      revenues: [{ clientId: "clientA", netGr: 1_000_000 }],
+      costs: [{ clientId: "clientA", categoryId: ADBUDGET, netGr: 500_000 }],
+      labor: [],
+      salaryCategoryIds: new Set<string>(),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set([ADBUDGET]),
+      leadCosts: [],
+    });
+    const v = r.rows.find((x) => x.clientId === "clientA")!;
+    expect(v.directCostsGr).toBe(0);
+    expect(r.adSpendBookedGr).toBe(500_000);
+    expect(r.unassignedAdSpendGr).toBe(500_000);
+    expectVerticalIdentityV2(r);
+  });
+
+  it("j) klient tylko z kosztem leadów (bez przychodów) → wiersz ze stratą, marża null", () => {
+    const r = computeProfitability({
+      revenues: [],
+      costs: [],
+      labor: [],
+      salaryCategoryIds: new Set<string>(),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set<string>(),
+      leadCosts: [{ clientId: "nowy", leadCostGr: 60_000 }],
+    });
+    const n = r.rows.find((x) => x.clientId === "nowy")!;
+    expect(n.profitGr).toBe(-60_000);
+    expect(n.marginFraction).toBeNull();
+    // booked 0, przypisane 60 000 → unassigned −60 000; firma: 0 − 0 = 0
+    expect(r.unassignedAdSpendGr).toBe(-60_000);
+    expectVerticalIdentityV2(r);
+  });
+
+  it("k) defaulty (bez nowych pól): unassigned 0, leadCostGr 0 wszędzie — stare zachowanie", () => {
+    const r = computeProfitability({
+      revenues: [{ clientId: "A", netGr: 100_000 }],
+      costs: [{ clientId: null, categoryId: "kat-biuro", netGr: 40_000 }],
+      labor: [],
+      salaryCategoryIds: new Set<string>(),
+      allocationEnabled: true,
+    });
+    expect(r.adSpendBookedGr).toBe(0);
+    expect(r.leadCostsTotalGr).toBe(0);
+    expect(r.unassignedAdSpendGr).toBe(0);
+    for (const row of r.rows) expect(row.leadCostGr).toBe(0);
+    expectVerticalIdentityV2(r); // V2 degeneruje się do V1
+  });
+
+  it("l) kategoria salary + adBudget naraz → wygrywa salary (kolejność sprawdzeń)", () => {
+    const BOTH = "kat-podwojna";
+    const r = computeProfitability({
+      revenues: [{ clientId: "A", netGr: 100_000 }],
+      costs: [{ clientId: null, categoryId: BOTH, netGr: 50_000 }],
+      labor: [],
+      salaryCategoryIds: new Set([BOTH]),
+      allocationEnabled: true,
+      adBudgetCategoryIds: new Set([BOTH]),
+      leadCosts: [],
+    });
+    expect(r.salaryCostsGr).toBe(50_000);
+    expect(r.adSpendBookedGr).toBe(0);
+    expectVerticalIdentityV2(r);
+  });
+});

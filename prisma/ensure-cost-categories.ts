@@ -14,11 +14,12 @@ async function main() {
   for (const def of DEFAULT_COST_CATEGORIES) {
     await db.costCategory.upsert({
       where: { name: def.name },
-      update: { isDeferred: def.isDeferred ?? false },
+      update: { isDeferred: def.isDeferred ?? false, isAdBudget: def.isAdBudget ?? false },
       create: {
         name: def.name,
         isSalary: def.isSalary,
         isDeferred: def.isDeferred ?? false,
+        isAdBudget: def.isAdBudget ?? false,
         position: ++pos,
       },
     });
@@ -27,7 +28,12 @@ async function main() {
     where: { isDeferred: true },
     select: { name: true },
   });
+  const adBudget = await db.costCategory.findMany({
+    where: { isAdBudget: true },
+    select: { name: true },
+  });
   console.log("Kategorie kosztów zsynchronizowane. Odłożone:", deferred.map((c) => c.name).join(", "));
+  console.log("Budżet reklamowy:", adBudget.map((c) => c.name).join(", "));
 }
 
 main()

@@ -8,6 +8,8 @@ import {
   lastMonths,
   lastMonthsRange,
   monthBounds,
+  monthKeysInRange,
+  nextMonthKey,
 } from "@/lib/periods";
 
 const utc = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d));
@@ -171,5 +173,52 @@ describe("monthBounds", () => {
     const { from, to } = monthBounds("2025-12");
     expect(from.toISOString()).toBe("2025-12-01T00:00:00.000Z");
     expect(to.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+  });
+});
+
+describe("nextMonthKey", () => {
+  it("zwykły miesiąc i przełom roku", () => {
+    expect(nextMonthKey("2026-07")).toBe("2026-08");
+    expect(nextMonthKey("2026-12")).toBe("2027-01");
+  });
+});
+
+describe("monthKeysInRange", () => {
+  it("pojedynczy miesiąc [1.07, 1.08) → jeden klucz", () => {
+    expect(monthKeysInRange(utc(2026, 6, 1), utc(2026, 7, 1))).toEqual(["2026-07"]);
+  });
+
+  it("kwartał → 3 miesiące", () => {
+    expect(monthKeysInRange(utc(2026, 6, 1), utc(2026, 9, 1))).toEqual([
+      "2026-07", "2026-08", "2026-09",
+    ]);
+  });
+
+  it("rok → 12 miesięcy", () => {
+    const keys = monthKeysInRange(utc(2026, 0, 1), utc(2027, 0, 1));
+    expect(keys).toHaveLength(12);
+    expect(keys[0]).toBe("2026-01");
+    expect(keys[11]).toBe("2026-12");
+  });
+
+  it("zakres tnący miesiące (15.07 – 11.08, to ekskluzywne) → oba częściowe miesiące", () => {
+    expect(monthKeysInRange(utc(2026, 6, 15), utc(2026, 7, 11))).toEqual([
+      "2026-07", "2026-08",
+    ]);
+  });
+
+  it("zakres wewnątrz jednego miesiąca → jeden klucz", () => {
+    expect(monthKeysInRange(utc(2026, 6, 10), utc(2026, 6, 20))).toEqual(["2026-07"]);
+  });
+
+  it("przełom roku grudzień → styczeń", () => {
+    expect(monthKeysInRange(utc(2025, 11, 20), utc(2026, 0, 5))).toEqual([
+      "2025-12", "2026-01",
+    ]);
+  });
+
+  it("pusty/odwrócony zakres → pusta lista", () => {
+    expect(monthKeysInRange(utc(2026, 6, 1), utc(2026, 6, 1))).toEqual([]);
+    expect(monthKeysInRange(utc(2026, 7, 1), utc(2026, 6, 1))).toEqual([]);
   });
 });

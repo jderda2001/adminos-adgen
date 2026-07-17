@@ -203,6 +203,9 @@ export async function toggleSalaryCategoryAction(
   const category = await db.costCategory.findUnique({ where: { id } });
   if (!category) return fail("Kategoria nie istnieje");
 
+  if (isSalary && category.isAdBudget) {
+    return fail("Kategoria budżetu reklamowego nie może być jednocześnie wynagrodzeniami");
+  }
   await db.costCategory.update({ where: { id }, data: { isSalary } });
 
   revalidatePath("/ustawienia");
@@ -212,5 +215,30 @@ export async function toggleSalaryCategoryAction(
     isSalary
       ? "Kategoria oznaczona jako wynagrodzenia"
       : "Zdjęto oznaczenie wynagrodzeń z kategorii"
+  );
+}
+
+export async function toggleAdBudgetCategoryAction(
+  id: string,
+  isAdBudget: boolean
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  const category = await db.costCategory.findUnique({ where: { id } });
+  if (!category) return fail("Kategoria nie istnieje");
+  if (isAdBudget && category.isSalary) {
+    return fail("Kategoria wynagrodzeń nie może być jednocześnie budżetem reklamowym");
+  }
+
+  await db.costCategory.update({ where: { id }, data: { isAdBudget } });
+
+  revalidatePath("/ustawienia");
+  revalidatePath("/rentownosc");
+  revalidatePath("/dashboard");
+  revalidatePath("/leady");
+  return ok(
+    isAdBudget
+      ? "Kategoria oznaczona jako budżet reklamowy"
+      : "Zdjęto oznaczenie budżetu reklamowego z kategorii"
   );
 }

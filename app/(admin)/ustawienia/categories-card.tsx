@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Plus, Trash2, Wallet } from "lucide-react";
+import { Check, Megaphone, Plus, Trash2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,7 @@ import {
   createCategoryAction,
   deleteCategoryAction,
   renameCategoryAction,
+  toggleAdBudgetCategoryAction,
   toggleSalaryCategoryAction,
 } from "./actions";
 
@@ -38,10 +39,13 @@ export interface CategoryRow {
   costsCount: number;
   recurringCount: number;
   isSalary: boolean; // kategoria wynagrodzeń — poza kosztami bezpośrednimi i alokacją
+  isAdBudget: boolean; // budżet reklamowy — poza direct/alokacją; klientom liczony koszt leadów
 }
 
 const SALARY_TOOLTIP =
   "Rozliczana kosztem pracy z godzin — poza kosztami bezpośrednimi i alokacją w rentowności";
+const ADBUDGET_TOOLTIP =
+  "Budżet reklamowy — koszty poza kosztami bezpośrednimi i alokacją; klientom przypisywany jest koszt leadów z modułu Leady";
 
 function usageLabel(c: CategoryRow): string {
   const parts = [
@@ -96,6 +100,14 @@ function CategoryItem({
     });
   }
 
+  function handleToggleAdBudget(next: boolean) {
+    startTransition(async () => {
+      const result = await toggleAdBudgetCategoryAction(category.id, next);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
+    });
+  }
+
   function handleDeleteClick() {
     if (usage > 0) {
       toast.error(
@@ -131,6 +143,18 @@ function CategoryItem({
           <TooltipContent>{SALARY_TOOLTIP}</TooltipContent>
         </Tooltip>
       )}
+      {category.isAdBudget && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help">
+              <StatusBadge tone="blue">
+                <Megaphone className="size-3" /> budżet reklamowy
+              </StatusBadge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{ADBUDGET_TOOLTIP}</TooltipContent>
+        </Tooltip>
+      )}
       <span className="w-36 shrink-0 text-right text-xs text-muted-foreground">
         {usageLabel(category)}
       </span>
@@ -146,6 +170,19 @@ function CategoryItem({
           </div>
         </TooltipTrigger>
         <TooltipContent>{SALARY_TOOLTIP}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex shrink-0 items-center">
+            <Switch
+              checked={category.isAdBudget}
+              onCheckedChange={handleToggleAdBudget}
+              disabled={pending}
+              aria-label={`Oznacz „${category.name}” jako budżet reklamowy`}
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{ADBUDGET_TOOLTIP}</TooltipContent>
       </Tooltip>
       <div className="flex w-16 shrink-0 justify-end gap-1">
         <Button

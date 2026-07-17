@@ -9,6 +9,7 @@ import {
   ChartSpline,
   Banknote,
   Receipt,
+  Target,
   CreditCard,
   TrendingUp,
   Building2,
@@ -43,6 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/finanse/przychody", label: "Przychody", icon: Banknote },
       { href: "/finanse/koszty", label: "Koszty", icon: Receipt },
+      { href: "/leady", label: "Leady", icon: Target },
       { href: "/platnosci", label: "Płatności", icon: CreditCard },
       { href: "/rentownosc", label: "Rentowność", icon: TrendingUp },
     ],

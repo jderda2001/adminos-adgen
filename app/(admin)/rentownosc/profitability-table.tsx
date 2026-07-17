@@ -22,6 +22,7 @@ export interface ProfitabilityRow {
   laborGr: number;
   minutes: number;
   allocationGr: number;
+  leadCostGr: number;
   profitGr: number;
   marginFraction: number | null;
   effectiveRateGr: number | null;
@@ -30,10 +31,13 @@ export interface ProfitabilityRow {
 export function ProfitabilityTable({
   rows,
   allocationEnabled,
+  showLeadCosts,
   marginThreshold,
 }: {
   rows: ProfitabilityRow[];
   allocationEnabled: boolean;
+  /** pokazuj kolumnę „Koszt leadów" (są dostawy albo księgowania budżetu reklamowego) */
+  showLeadCosts: boolean;
   marginThreshold: number;
 }) {
   const router = useRouter();
@@ -47,6 +51,7 @@ export function ProfitabilityTable({
     const laborGr = rows.reduce((a, r) => a + r.laborGr, 0);
     const minutes = rows.reduce((a, r) => a + r.minutes, 0);
     const allocationGr = rows.reduce((a, r) => a + r.allocationGr, 0);
+    const leadCostGr = rows.reduce((a, r) => a + r.leadCostGr, 0);
     const profitGr = rows.reduce((a, r) => a + r.profitGr, 0);
     return {
       revenueGr,
@@ -54,6 +59,7 @@ export function ProfitabilityTable({
       laborGr,
       minutes,
       allocationGr,
+      leadCostGr,
       profitGr,
       marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
       effectiveRateGr:
@@ -97,6 +103,20 @@ export function ProfitabilityTable({
         meta: { align: "right" },
         cell: ({ row }) => formatMoney(row.original.directCostsGr),
       },
+      ...(showLeadCosts
+        ? ([
+            {
+              accessorKey: "leadCostGr",
+              header: ({ column }) => (
+                <SortableHeader column={column} align="right">
+                  Koszt leadów
+                </SortableHeader>
+              ),
+              meta: { align: "right" },
+              cell: ({ row }) => formatMoney(row.original.leadCostGr),
+            },
+          ] as ColumnDef<ProfitabilityRow>[])
+        : []),
       {
         accessorKey: "laborGr",
         header: ({ column }) => (
@@ -187,7 +207,7 @@ export function ProfitabilityTable({
 
     return cols;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allocationEnabled, marginThreshold]);
+  }, [allocationEnabled, showLeadCosts, marginThreshold]);
 
   return (
     <DataTable
@@ -213,6 +233,11 @@ export function ProfitabilityTable({
           <TableCell className="text-right font-medium tabular-nums">
             {formatMoney(totals.directCostsGr)}
           </TableCell>
+          {showLeadCosts && (
+            <TableCell className="text-right font-medium tabular-nums">
+              {formatMoney(totals.leadCostGr)}
+            </TableCell>
+          )}
           <TableCell className="text-right font-medium tabular-nums">
             <div>{formatMoney(totals.laborGr)}</div>
             <div className="text-xs font-normal text-muted-foreground">

@@ -70,6 +70,7 @@ export default async function ProfitabilityPage({
     laborGr: r.laborGr,
     minutes: r.minutes,
     allocationGr: r.allocationGr,
+    leadCostGr: r.leadCostGr,
     profitGr: r.profitGr,
     marginFraction: r.marginFraction,
     effectiveRateGr: r.effectiveRateGr,
@@ -79,6 +80,8 @@ export default async function ProfitabilityPage({
   const belowThresholdCount = rows.filter(
     (r) => r.marginFraction !== null && r.marginFraction < marginThreshold
   ).length;
+  // kolumna „Koszt leadów" gdy w okresie są dostawy albo księgowania budżetu reklamowego
+  const showLeadCosts = prof.leadCostsTotalGr > 0 || prof.adSpendBookedGr > 0;
 
   return (
     <>
@@ -122,9 +125,21 @@ export default async function ProfitabilityPage({
           />
         </div>
 
+        {prof.leadWarnings.length > 0 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            Część dostaw leadów nie ma kampanii do wyceny (koszt 0 lub średnia
+            wertykalu) — uzupełnij kampanie w{" "}
+            <a href="/leady" className="font-medium underline underline-offset-2">
+              module Leady
+            </a>
+            .
+          </div>
+        )}
+
         <ProfitabilityTable
           rows={rows}
           allocationEnabled={prof.allocationEnabled}
+          showLeadCosts={showLeadCosts}
           marginThreshold={marginThreshold}
         />
 
@@ -150,6 +165,12 @@ export default async function ProfitabilityPage({
               label="− Wynagrodzenia niepokryte godzinami"
               amountGr={prof.salariesNotCoveredGr}
             />
+            {showLeadCosts && (
+              <ReconciliationRow
+                label="− Nieprzypisane wydatki reklamowe"
+                amountGr={prof.unassignedAdSpendGr}
+              />
+            )}
             <Separator className="my-1" />
             <ReconciliationRow
               label="= Zysk firmy"
@@ -163,6 +184,15 @@ export default async function ProfitabilityPage({
             bezpośrednich klientów ani do alokacji kosztów ogólnych, bo pensje
             są rozliczane kosztem pracy wyliczonym z godzin i stawek
             godzinowych — inaczej liczylibyśmy je podwójnie.
+            {showLeadCosts && (
+              <>
+                {" "}
+                Analogicznie przelewy z kategorii „budżet reklamowy” nie wchodzą
+                do alokacji — klientom przypisywany jest koszt leadów (leady ×
+                CPL z modułu Leady), a reszta wydatków to pozycja
+                „nieprzypisane” (leady niesprzedane, testy, różnice zaokrągleń).
+              </>
+            )}
             {!prof.allocationEnabled && (
               <>
                 {" "}

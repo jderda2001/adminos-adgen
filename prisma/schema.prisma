@@ -81,6 +81,7 @@ model Client {
   recurringCosts RecurringCost[]
   activeTimers   ActiveTimer[]
   planNotes      RevenuePlanNote[]
+  leadDeliveries LeadDelivery[]
 }
 
 // ── Faktury sprzedażowe (przychody) ─────────────────────────────────
@@ -132,6 +133,7 @@ model CostCategory {
   position   Int     @default(0)
   isSalary   Boolean @default(false) // kategoria wynagrodzeń: rozliczana kosztem pracy z godzin, poza alokacją
   isDeferred Boolean @default(false) // koszt wewnętrzny/odłożony (zaliczki CIT/premie, oszczędności) — przelew na własne konto; NIE liczony jako koszt zewnętrzny w zysku/rentowności
+  isAdBudget Boolean @default(false) // budżet reklamowy: poza kosztami bezpośrednimi i pulą alokacji — klientom przypisywany jest koszt leadów z modułu Leady
 
   costs          Cost[]
   recurringCosts RecurringCost[]
@@ -260,6 +262,59 @@ model RevenuePlanNote {
   note     String
 
   @@unique([clientId, period])
+}
+
+// ── Ekonomika leadów (moduł Leady) ───────────────────────────────────
+// Marki wewnętrzne agencji prowadzą kampanie leadowe na wspólnym koncie
+// Meta (nazwy marek poza repo — config/brands.json). Miesięczne wyniki (marka × wertykal)
+// przepisywane z Meta Ads Manager dają CPL; dostawy leadów do klientów
+// wyliczają koszt leadów per klient (leady × CPL) — wchodzi do rentowności.
+
+model Brand {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  campaigns  LeadCampaignMonth[]
+  deliveries LeadDelivery[]
+}
+
+// Miesięczny wynik kampanii marka × wertykal — spend i liczba leadów
+// z Meta Ads Manager. Kwoty NETTO w groszach. CPL = spendGr / leadsCount.
+model LeadCampaignMonth {
+  id         String   @id @default(cuid())
+  period     String // "RRRR-MM"
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  vertical   String // wartość z LEAD_CATEGORIES (lib/types.ts)
+  spendGr    Int // wydatki NETTO w groszach
+  leadsCount Int
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@unique([period, brandId, vertical])
+  @@index([period])
+}
+
+// Dostawa leadów do klienta w miesiącu. brandId null = mix marek →
+// rozliczenie po średniej ważonej CPL wertykalu. Celowo BEZ unique —
+// klient może mieć kilka paczek w miesiącu, koszty się sumują.
+model LeadDelivery {
+  id         String   @id @default(cuid())
+  period     String // "RRRR-MM"
+  clientId   String
+  client     Client   @relation(fields: [clientId], references: [id])
+  vertical   String
+  brandId    String?
+  brand      Brand?   @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  leadsCount Int
+  note       String?
+  createdAt  DateTime @default(now())
+
+  @@index([period])
+  @@index([clientId, period])
 }
 
 // ── Rachunek wyników (RW) — najważniejszy moduł ─────────────────────

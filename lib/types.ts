@@ -123,17 +123,35 @@ export const DEFAULT_COST_CATEGORIES: ReadonlyArray<{
   name: string;
   isSalary: boolean;
   isDeferred?: boolean;
+  isAdBudget?: boolean;
 }> = [
   { name: "Abonamenty", isSalary: false },
   { name: "Pozostałe wydatki operacyjne", isSalary: false },
   { name: "Wypłaty | Zarząd", isSalary: true },
   { name: "Wypłaty | Zespół", isSalary: true },
   { name: "Podwykonawcy", isSalary: false },
+  // budżet reklamowy (Meta) — poza direct/alokacją; klientom liczony koszt leadów:
+  { name: "Budżet reklamowy", isSalary: false, isAdBudget: true },
   // odłożone środki (koszt wewnętrzny — przelew na własne konto, poza zyskiem):
   { name: "Zaliczki na CIT / premie", isSalary: false, isDeferred: true },
   { name: "Oszczędności", isSalary: false, isDeferred: true },
   { name: "Inne", isSalary: false },
 ];
+
+// ── Ekonomika leadów (moduł Leady) ──────────────────────────────────
+
+// Marki wewnętrzne: nazwy to dane biznesowe agencji, więc NIE są w repo —
+// domyślne marki wczytuje `loadDefaultBrands()` z config/brands.json
+// (gitignore), a użytkownik zarządza nimi w module Leady (dialog „Marki").
+
+// Źródło CPL zastosowanego do dostawy leadów
+export const LEAD_COST_SOURCES = ["MARKA", "SREDNIA_WERTYKALU", "BRAK_KAMPANII"] as const;
+export type LeadCostSource = (typeof LEAD_COST_SOURCES)[number];
+export const LEAD_COST_SOURCE_LABELS: Record<LeadCostSource, string> = {
+  MARKA: "CPL marki",
+  SREDNIA_WERTYKALU: "śr. wertykalu",
+  BRAK_KAMPANII: "brak kampanii",
+};
 
 // Dwustopniowy flow płatności kosztu: brak działań → można płacić → opłacone
 export const COST_APPROVAL_LABELS = {

@@ -53,3 +53,6 @@ prisma/adgen.db-journal
 config/rw-people.json
 # numery kont firmowych (dedup przelewów własnych) — wzór: rw-accounts.example.json
 config/rw-accounts.json
+# nazwy marek wewnętrznych (moduł Leady) — dane biznesowe poza publicznym repo.
+# Wzór: config/brands.example.json (śledzony). Realny plik NIE trafia do repo.
+config/brands.json

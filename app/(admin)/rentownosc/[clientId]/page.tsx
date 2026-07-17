@@ -5,16 +5,18 @@ import { ArrowLeft } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import {
+  getClientLeadCosts,
   getClientMonthlyProfit,
   getClientProfitability,
 } from "@/lib/reports";
 import { resolvePeriod, type PeriodSearchParams } from "@/lib/periods";
-import { getSalaryCategoryIds } from "@/lib/settings";
+import { getAdBudgetCategoryIds, getSalaryCategoryIds } from "@/lib/settings";
 import { effectiveRateGr, laborCostGr } from "@/lib/calc";
 import {
   formatDate,
   formatHours,
   formatMoney,
+  formatMonth,
   formatPercent,
 } from "@/lib/format";
 import {
@@ -55,13 +57,17 @@ export default async function ClientProfitabilityPage({
   if (!client) notFound();
 
   // Kategorie wynagrodzeń są w rentowności rozliczane kosztem pracy z godzin,
-  // więc wyłączamy je z tabeli kosztów bezpośrednich — aby suma zgadzała się z
-  // kosztem bezpośrednim uwzględnianym w KPI.
-  const salaryCategoryIds = await getSalaryCategoryIds();
+  // a budżetu reklamowego — kosztem leadów (moduł Leady), więc wyłączamy obie
+  // z tabeli kosztów bezpośrednich — aby suma zgadzała się z KPI.
+  const [salaryCategoryIds, adBudgetCategoryIds] = await Promise.all([
+    getSalaryCategoryIds(),
+    getAdBudgetCategoryIds(),
+  ]);
 
-  const [prof, monthly, invoices, costs, entries, users] = await Promise.all([
+  const [prof, monthly, leadCosts, invoices, costs, entries, users] = await Promise.all([
     getClientProfitability(period),
     getClientMonthlyProfit(client.id, 12),
+    getClientLeadCosts(client.id, period),
     db.invoice.findMany({
       where: {
         clientId: client.id,
@@ -75,7 +81,7 @@ export default async function ClientProfitabilityPage({
       where: {
         clientId: client.id,
         needsConfirmation: false,
-        categoryId: { notIn: [...salaryCategoryIds] },
+        categoryId: { notIn: [...salaryCategoryIds, ...adBudgetCategoryIds] },
         docDate: { gte: period.from, lt: period.to },
       },
       orderBy: { docDate: "desc" },
@@ -327,10 +333,86 @@ export default async function ClientProfitabilityPage({
               </Table>
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              Bez kategorii wynagrodzeń (rozliczane kosztem pracy).
+              Bez kategorii wynagrodzeń (rozliczane kosztem pracy) i budżetu
+              reklamowego (rozliczany kosztem leadów).
             </p>
           </section>
         </div>
+
+        {(leadCosts.rows.length > 0 || client.billingModel === "PAKIETY_LEADOW") && (
+          <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+            <h2 className="font-heading text-base font-semibold">
+              Leady w okresie
+            </h2>
+            <div className="mt-3 overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Miesiąc</TableHead>
+                    <TableHead>Marka</TableHead>
+                    <TableHead>Wertykal</TableHead>
+                    <TableHead className="text-right">Leady</TableHead>
+                    <TableHead className="text-right">CPL</TableHead>
+                    <TableHead className="text-right">Koszt</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {leadCosts.rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        className="py-8 text-center text-sm text-muted-foreground"
+                      >
+                        Brak dostaw leadów w okresie — dodaj je w module Leady.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    leadCosts.rows.map((r) => (
+                      <TableRow key={r.deliveryId}>
+                        <TableCell className="capitalize">
+                          {formatMonth(r.period)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {r.brandName ?? "mix"}
+                        </TableCell>
+                        <TableCell>{r.vertical}</TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {r.leadsCount}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {r.cplGr !== null ? formatMoney(r.cplGr) : "—"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatMoney(r.costGr)}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+                {leadCosts.rows.length > 0 && (
+                  <TableFooter>
+                    <TableRow>
+                      <TableCell colSpan={3} className="font-medium">
+                        Suma
+                      </TableCell>
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {leadCosts.totalLeads}
+                      </TableCell>
+                      <TableCell />
+                      <TableCell className="text-right font-medium tabular-nums">
+                        {formatMoney(leadCosts.totalGr)}
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
+                )}
+              </Table>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Koszt leadów = leady × CPL kampanii (moduł Leady) — pomniejsza
+              zysk klienta.
+            </p>
+          </section>
+        )}
 
         <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
           <h2 className="font-heading text-base font-semibold">
