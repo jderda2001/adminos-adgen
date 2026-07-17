@@ -28,6 +28,35 @@ import {
   type MonthlyChartPoint,
 } from "./chart-shared";
 
+// Własna legenda — domyślna próbka Recharts to zawsze linia ciągła, więc nie
+// oddaje, że marża jest rysowana przerywaną linią. Rysujemy próbki ręcznie.
+function ProfitMarginLegend() {
+  return (
+    <div className="flex items-center justify-center gap-5 pt-1 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5">
+        <svg width="22" height="8" aria-hidden>
+          <line x1="0" y1="4" x2="22" y2="4" stroke={CHART_COLORS.profit} strokeWidth={2} />
+        </svg>
+        Zysk (zł)
+      </span>
+      <span className="flex items-center gap-1.5">
+        <svg width="22" height="8" aria-hidden>
+          <line
+            x1="0"
+            y1="4"
+            x2="22"
+            y2="4"
+            stroke={CHART_COLORS.margin}
+            strokeWidth={2}
+            strokeDasharray="4 3"
+          />
+        </svg>
+        Marża (%) — linia przerywana
+      </span>
+    </div>
+  );
+}
+
 export function ProfitMarginChart({ points }: { points: MonthlyChartPoint[] }) {
   const hasData = points.some((p) => p.revenueGr !== 0 || p.costsGr !== 0);
   if (!hasData) {
@@ -110,7 +139,7 @@ export function ProfitMarginChart({ points }: { points: MonthlyChartPoint[] }) {
             );
           }}
         />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
+        <Legend wrapperStyle={{ fontSize: 12 }} content={<ProfitMarginLegend />} />
         <Line
           yAxisId="profit"
           type="monotone"

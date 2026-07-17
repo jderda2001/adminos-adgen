@@ -169,25 +169,79 @@ export interface CostCategorySlice {
   netGr: number;
 }
 
-/** Struktura kosztów per kategoria w okresie (donut na Dashboardzie) */
+/**
+ * Struktura kosztów per kategoria w okresie (donut na Dashboardzie).
+ * Kategorie budżetu reklamowego (isAdBudget) są rozbijane na dwa slice'y:
+ * „Budżet reklamowy (klienci)" = koszt leadów przypisany klientom (leady × CPL
+ * z modułu Leady) i „Marketing własny" = reszta wydatków reklamowych. Suma obu
+ * = łączny zaksięgowany budżet reklamowy (donut się nie zmienia w total).
+ */
 export async function getCostStructure(
   period: Period
 ): Promise<CostCategorySlice[]> {
-  const grouped = await db.cost.groupBy({
-    by: ["categoryId"],
-    where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
-    _sum: { netGr: true },
-  });
-  const categories = await db.costCategory.findMany();
+  const leadMonths = monthKeysInRange(period.from, period.to);
+  const [grouped, categories, adBudgetCategoryIds, deliveries, campaigns] =
+    await Promise.all([
+      db.cost.groupBy({
+        by: ["categoryId"],
+        where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
+        _sum: { netGr: true },
+      }),
+      db.costCategory.findMany(),
+      getAdBudgetCategoryIds(),
+      db.leadDelivery.findMany({
+        where: { period: { in: leadMonths } },
+        select: { id: true, period: true, clientId: true, vertical: true, brandId: true, leadsCount: true },
+      }),
+      db.leadCampaignMonth.findMany({
+        where: { period: { in: leadMonths } },
+        select: { brandId: true, period: true, vertical: true, spendGr: true, leadsCount: true },
+      }),
+    ]);
+
   const nameMap = new Map(categories.map((c) => [c.id, c.name]));
-  return grouped
-    .map((g) => ({
+
+  // zwykłe kategorie (poza budżetem reklamowym) → slice 1:1
+  const slices: CostCategorySlice[] = [];
+  let bookedAdGr = 0;
+  for (const g of grouped) {
+    const netGr = g._sum.netGr ?? 0;
+    if (adBudgetCategoryIds.has(g.categoryId)) {
+      bookedAdGr += netGr;
+      continue;
+    }
+    slices.push({
       categoryId: g.categoryId,
       categoryName: nameMap.get(g.categoryId) ?? "?",
-      netGr: g._sum.netGr ?? 0,
-    }))
-    .filter((s) => s.netGr > 0)
-    .sort((a, b) => b.netGr - a.netGr);
+      netGr,
+    });
+  }
+
+  // rozbicie budżetu reklamowego: przypisane leadom (klienci) vs reszta (marketing własny)
+  if (bookedAdGr > 0) {
+    const assignedGr = buildLeadCosts(deliveries, campaigns).perClient.reduce(
+      (s, c) => s + c.leadCostGr,
+      0
+    );
+    const clientsGr = Math.min(Math.max(assignedGr, 0), bookedAdGr);
+    const ownGr = bookedAdGr - clientsGr;
+    if (clientsGr > 0) {
+      slices.push({
+        categoryId: "__adbudget_clients__",
+        categoryName: "Budżet reklamowy (klienci)",
+        netGr: clientsGr,
+      });
+    }
+    if (ownGr > 0) {
+      slices.push({
+        categoryId: "__adbudget_own__",
+        categoryName: "Marketing własny",
+        netGr: ownGr,
+      });
+    }
+  }
+
+  return slices.filter((s) => s.netGr > 0).sort((a, b) => b.netGr - a.netGr);
 }
 
 // ── Rentowność klientów ──────────────────────────────────────────────
