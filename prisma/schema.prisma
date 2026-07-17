@@ -89,7 +89,7 @@ model Client {
 model Invoice {
   id        String    @id @default(cuid())
   number    String?   @unique // opcjonalny — „bez fv" gdy faktura jeszcze niewystawiona
-  label     String? // opis pozycji przychodu, np. „Votum | SKD"
+  label     String? // opis pozycji przychodu, np. „Klient | SKD"
   offerTags String? // tagi oferty na wierszu, po przecinku
   clientId  String
   client    Client    @relation(fields: [clientId], references: [id])

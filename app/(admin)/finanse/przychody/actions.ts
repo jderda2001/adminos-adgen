@@ -16,7 +16,7 @@ import { VAT_RATES, type VatRate } from "@/lib/types";
 export interface InvoiceFormInput {
   number: string; // opcjonalny nr faktury; "" = „bez fv"
   clientId: string;
-  label: string; // opis pozycji, np. „Votum | SKD" (opcjonalny)
+  label: string; // opis pozycji, np. „Klient | SKD" (opcjonalny)
   net: string; // kwota netto w zł, np. „12 000,00"
   vatRate: string;
   saleDate: string; // „RRRR-MM-DD" — data przychodu (= issueDate)

@@ -199,7 +199,7 @@ export function InvoiceFormDialog({
                 id="label"
                 name="label"
                 defaultValue={invoice?.label ?? ""}
-                placeholder="np. Votum | SKD"
+                placeholder="np. Klient | SKD"
               />
             </div>
           </div>
