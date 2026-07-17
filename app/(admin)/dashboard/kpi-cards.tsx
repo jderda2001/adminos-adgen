@@ -72,7 +72,7 @@ export function KpiCards({ pnl, vat, overdue, overdueCosts }: KpiCardsProps) {
         value={formatMoney(overdue.totalGr)}
         sub={overdueSub}
         tone={overdueTone}
-        href="/platnosci"
+        href="/platnosci?zakladka=do-sciagniecia"
       />
       <KpiCard
         label="Zobowiązania przeterminowane"
