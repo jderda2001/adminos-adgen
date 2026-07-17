@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import type { RwReport } from "@/lib/rw";
-import { RW_BOA_TARGETS } from "@/lib/rw";
+import type { BoaTargets } from "@/lib/settings";
 import { RW_MONTH_LABELS } from "@/lib/rw-types";
 import { formatRwPct } from "./rw-format";
 import {
@@ -27,7 +27,13 @@ const BOA_ROWS: { key: BoaKey; label: string }[] = [
   { key: "podatkiIZaliczki", label: "Podatki (CIT) + zaliczki" },
 ];
 
-export function RwBoaCard({ report }: { report: RwReport }) {
+export function RwBoaCard({
+  report,
+  targets,
+}: {
+  report: RwReport;
+  targets: BoaTargets;
+}) {
   const withData = report.monthsWithData;
   const [month, setMonth] = useState<number>(
     withData.length ? withData[withData.length - 1] : 1
@@ -71,7 +77,7 @@ export function RwBoaCard({ report }: { report: RwReport }) {
       <div className="divide-y divide-border/60">
         {BOA_ROWS.map(({ key, label }) => {
           const live = m.liveBoa[key];
-          const target = RW_BOA_TARGETS[key];
+          const target = targets[key];
           const liveFrac = live ?? 0;
           const barPct = Math.min(100, Math.max(0, liveFrac * 100));
           const markerPct = Math.min(100, Math.max(0, target * 100));

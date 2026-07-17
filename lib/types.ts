@@ -112,6 +112,11 @@ export const SETTING_DEFAULTS = {
   company_address: "",
   company_account: "", // NRB 26 cyfr — rachunek zleceniodawcy do eksportu Elixir
   estymacje_nowy_biznes_gr: "0", // założenie „nowy biznes"/mies. NETTO w groszach (moduł Estymacje)
+  // Cele BOA — docelowy podział przychodu (%). Edytowalne co kwartał w Ustawieniach.
+  boa_oszczednosci_pct: "9",
+  boa_wlasciciele_pct: "23",
+  boa_operacyjne_pct: "65",
+  boa_podatki_pct: "3",
 } as const;
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 

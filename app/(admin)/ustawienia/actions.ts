@@ -50,6 +50,52 @@ export async function saveProfitabilitySettingsAction(
   return ok("Ustawienia rentowności zostały zapisane");
 }
 
+// ── Cele BOA (docelowy podział przychodu) ────────────────────────────
+
+const pctField = z.coerce
+  .number({ message: "Podaj procent" })
+  .min(0, "Procent nie może być ujemny")
+  .max(100, "Procent nie może przekraczać 100");
+
+const boaSchema = z.object({
+  oszczednosci: pctField,
+  wlasciciele: pctField,
+  operacyjne: pctField,
+  podatki: pctField,
+});
+
+export async function saveBoaTargetsAction(
+  formData: FormData
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  const parsed = boaSchema.safeParse({
+    oszczednosci: formData.get("oszczednosci"),
+    wlasciciele: formData.get("wlasciciele"),
+    operacyjne: formData.get("operacyjne"),
+    podatki: formData.get("podatki"),
+  });
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Nieprawidłowe dane formularza");
+  }
+
+  const { oszczednosci, wlasciciele, operacyjne, podatki } = parsed.data;
+  const sum = oszczednosci + wlasciciele + operacyjne + podatki;
+  // tolerancja na zaokrąglenia (np. 9+23+65+3 = 100)
+  if (Math.abs(sum - 100) > 0.5) {
+    return fail(`Cele muszą sumować się do 100% (obecnie ${sum.toFixed(1)}%)`);
+  }
+
+  await setSetting("boa_oszczednosci_pct", String(oszczednosci));
+  await setSetting("boa_wlasciciele_pct", String(wlasciciele));
+  await setSetting("boa_operacyjne_pct", String(operacyjne));
+  await setSetting("boa_podatki_pct", String(podatki));
+
+  revalidatePath("/ustawienia");
+  revalidatePath("/rachunek-wynikow");
+  return ok("Cele BOA zostały zapisane");
+}
+
 // ── Dane firmy (eksport przelewów Elixir) ────────────────────────────
 
 const companySchema = z.object({

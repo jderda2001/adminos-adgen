@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/page-header";
 import { ProfitabilityCard } from "./profitability-card";
+import { BoaCard } from "./boa-card";
 import { CompanyCard } from "./company-card";
 import { CategoriesCard, type CategoryRow } from "./categories-card";
 
@@ -39,6 +40,14 @@ export default async function SettingsPage() {
         <ProfitabilityCard
           allocationEnabled={settings.allocation_enabled === "1"}
           marginThresholdPct={settings.margin_threshold_pct}
+        />
+        <BoaCard
+          targets={{
+            oszczednosci: settings.boa_oszczednosci_pct,
+            wlasciciele: settings.boa_wlasciciele_pct,
+            operacyjne: settings.boa_operacyjne_pct,
+            podatki: settings.boa_podatki_pct,
+          }}
         />
         <CompanyCard
           name={settings.company_name}

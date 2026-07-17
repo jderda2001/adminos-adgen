@@ -5,6 +5,7 @@
 
 import { useRouter, usePathname } from "next/navigation";
 import type { RwReport } from "@/lib/rw";
+import type { BoaTargets } from "@/lib/settings";
 import type { PersonRule } from "@/lib/rw-categorize";
 import type { InternalRulesConfig } from "@/lib/rw-internal";
 import type { BankAccount } from "@/lib/bank-parse";
@@ -35,6 +36,7 @@ export interface RwBatchRow {
 
 export function RwView({
   report,
+  boaTargets,
   years,
   batches,
   peopleRules,
@@ -45,6 +47,7 @@ export function RwView({
   aiEnabled,
 }: {
   report: RwReport;
+  boaTargets: BoaTargets;
   years: number[];
   batches: RwBatchRow[];
   peopleRules: PersonRule[];
@@ -123,7 +126,7 @@ export function RwView({
       ) : (
         <>
           <RwKpis report={report} />
-          <RwBoaCard report={report} />
+          <RwBoaCard report={report} targets={boaTargets} />
           <RwCharts report={report} />
           <RwTable report={report} />
           <RwManualMetrics report={report} />

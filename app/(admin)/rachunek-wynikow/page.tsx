@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth";
 import { buildRwReport, type RwReport } from "@/lib/rw";
 import { loadPeopleRules } from "@/lib/rw-people";
 import { loadInternalRulesConfig } from "@/lib/rw-accounts";
+import { getBoaTargets } from "@/lib/settings";
 import type { BankAccount } from "@/lib/bank-parse";
 import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -36,7 +37,7 @@ export default async function RachunekWynikowPage({
   const requested = params.rok ? parseInt(params.rok, 10) : NaN;
   const year = years.includes(requested) ? requested : years[0];
 
-  const [entries, manual, batches, vatRuleRows] = await Promise.all([
+  const [entries, manual, batches, vatRuleRows, boaTargets] = await Promise.all([
     db.rwEntry.findMany({
       where: { year },
       select: { month: true, kind: true, category: true, amountGr: true },
@@ -52,6 +53,7 @@ export default async function RachunekWynikowPage({
     db.rwVatRule.findMany({
       select: { matchKey: true, vatRate: true, category: true },
     }),
+    getBoaTargets(),
   ]);
 
   // nauczone referencje per kontrahent (klucz → stawka VAT / kategoria) —
@@ -116,6 +118,7 @@ export default async function RachunekWynikowPage({
       />
       <RwView
         report={report}
+        boaTargets={boaTargets}
         years={years}
         batches={batchRows}
         peopleRules={loadPeopleRules()}
