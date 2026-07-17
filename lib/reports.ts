@@ -30,7 +30,7 @@ import {
   isAllocationEnabled,
 } from "./settings";
 import { computeVatFromNet } from "./calc";
-import { isVatRate, type LeadCostSource } from "./types";
+import { isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
   cplGr,
@@ -576,6 +576,136 @@ export async function getClientLeadCosts(
     totalGr: rows.reduce((s, r) => s + r.costGr, 0),
     totalLeads: rows.reduce((s, r) => s + r.leadsCount, 0),
   };
+}
+
+// ── Rentowność nisz (wertykali) ──────────────────────────────────────
+
+/** Wertykal z tagów oferty faktury (np. „PAKIETY LEADÓW,Leady: SKD" → „SKD"). */
+function verticalFromOfferTags(offerTags: string | null): string | null {
+  if (!offerTags) return null;
+  for (const raw of offerTags.split(",")) {
+    const tag = raw.trim();
+    if (tag.startsWith(LEAD_TAG_PREFIX)) {
+      return tag.slice(LEAD_TAG_PREFIX.length).trim() || null;
+    }
+  }
+  return null;
+}
+
+export interface VerticalProfitRow {
+  vertical: string;
+  leadsCount: number; // pozyskane w kampaniach
+  spendGr: number; // wydatki kampanii (koszt pozyskania)
+  revenueGr: number; // przychód z faktur z tagiem „Leady: <wertykal>"
+  profitGr: number; // przychód − wydatki (P&L niszy)
+  marginFraction: number | null;
+}
+
+/**
+ * Rentowność per nisza (wertykal) w okresie: wydatki kampanii (koszt
+ * pozyskania) vs przychód przypisany po tagu faktury „Leady: <wertykal>".
+ * Zysk = przychód − wydatki (uwzględnia też leady niesprzedane jako koszt).
+ * Uwaga: przychód zależy od konsekwentnego tagowania faktur w Przychodach.
+ */
+export async function getVerticalProfitability(
+  period: Period
+): Promise<VerticalProfitRow[]> {
+  const months = monthKeysInRange(period.from, period.to);
+  const [campaigns, invoices] = await Promise.all([
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: months } },
+      select: { vertical: true, spendGr: true, leadsCount: true },
+    }),
+    db.invoice.findMany({
+      where: {
+        ...REVENUE_WHERE,
+        saleDate: { gte: period.from, lt: period.to },
+        offerTags: { contains: LEAD_TAG_PREFIX },
+      },
+      select: { netGr: true, offerTags: true },
+    }),
+  ]);
+
+  const map = new Map<string, { leadsCount: number; spendGr: number; revenueGr: number }>();
+  const bucket = (v: string) => {
+    let e = map.get(v);
+    if (!e) {
+      e = { leadsCount: 0, spendGr: 0, revenueGr: 0 };
+      map.set(v, e);
+    }
+    return e;
+  };
+  for (const c of campaigns) {
+    const e = bucket(c.vertical);
+    e.spendGr += c.spendGr;
+    e.leadsCount += c.leadsCount;
+  }
+  for (const inv of invoices) {
+    const v = verticalFromOfferTags(inv.offerTags);
+    if (v) bucket(v).revenueGr += inv.netGr;
+  }
+
+  return [...map.entries()]
+    .map(([vertical, e]) => {
+      const profitGr = e.revenueGr - e.spendGr;
+      return {
+        vertical,
+        leadsCount: e.leadsCount,
+        spendGr: e.spendGr,
+        revenueGr: e.revenueGr,
+        profitGr,
+        marginFraction: e.revenueGr > 0 ? profitGr / e.revenueGr : null,
+      };
+    })
+    .sort((a, b) => b.revenueGr - a.revenueGr || b.spendGr - a.spendGr);
+}
+
+/** Rentowność jednej niszy per miesiąc (wykres w widoku szczegółowym niszy). */
+export async function getVerticalMonthlyProfit(
+  vertical: string,
+  n = 12
+): Promise<MonthlyPoint[]> {
+  const { from, to } = lastMonthsRange(n);
+  const months = lastMonths(n);
+  const [campaigns, invoices] = await Promise.all([
+    db.leadCampaignMonth.findMany({
+      where: { vertical, period: { in: months } },
+      select: { period: true, spendGr: true },
+    }),
+    db.invoice.findMany({
+      where: {
+        ...REVENUE_WHERE,
+        saleDate: { gte: from, lt: to },
+        offerTags: { contains: `${LEAD_TAG_PREFIX}${vertical}` },
+      },
+      select: { saleDate: true, netGr: true, offerTags: true },
+    }),
+  ]);
+
+  const spendByMonth = new Map<string, number>();
+  for (const c of campaigns) {
+    spendByMonth.set(c.period, (spendByMonth.get(c.period) ?? 0) + c.spendGr);
+  }
+  const revByMonth = new Map<string, number>();
+  for (const inv of invoices) {
+    // `contains` to wstępny filtr — dokładne dopasowanie wertykalu w JS
+    if (verticalFromOfferTags(inv.offerTags) !== vertical) continue;
+    const key = monthKey(inv.saleDate);
+    revByMonth.set(key, (revByMonth.get(key) ?? 0) + inv.netGr);
+  }
+
+  return months.map((month) => {
+    const revenueGr = revByMonth.get(month) ?? 0;
+    const costsGr = spendByMonth.get(month) ?? 0;
+    const profitGr = revenueGr - costsGr;
+    return {
+      month,
+      revenueGr,
+      costsGr,
+      profitGr,
+      marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
+    };
+  });
 }
 
 // ── Koszty cykliczne — leniwe generowanie miesięcznych kopii ────────

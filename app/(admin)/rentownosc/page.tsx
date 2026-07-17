@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/lib/auth";
-import { getClientProfitability } from "@/lib/reports";
+import { getClientProfitability, getVerticalProfitability } from "@/lib/reports";
 import { getMarginThresholdFraction } from "@/lib/settings";
 import { resolvePeriod, type PeriodSearchParams } from "@/lib/periods";
 import { formatMoney, formatPercent } from "@/lib/format";
@@ -13,6 +13,7 @@ import {
   ProfitabilityTable,
   type ProfitabilityRow,
 } from "./profitability-table";
+import { VerticalProfitabilityTable } from "./vertical-profitability-table";
 
 export const metadata: Metadata = { title: "Rentowność klientów" };
 
@@ -57,9 +58,10 @@ export default async function ProfitabilityPage({
   await requireAdmin();
   const period = resolvePeriod(await searchParams);
 
-  const [prof, marginThreshold] = await Promise.all([
+  const [prof, marginThreshold, verticalRows] = await Promise.all([
     getClientProfitability(period),
     getMarginThresholdFraction(),
+    getVerticalProfitability(period),
   ]);
 
   const rows: ProfitabilityRow[] = prof.rows.map((r) => ({
@@ -139,6 +141,21 @@ export default async function ProfitabilityPage({
           showLeadCosts={showLeadCosts}
           marginThreshold={marginThreshold}
         />
+
+        {verticalRows.length > 0 && (
+          <section className="space-y-2">
+            <div>
+              <h2 className="font-heading text-base font-semibold">
+                Rentowność nisz (wertykali)
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Wydatki kampanii vs przychód z faktur z tagiem „Leady: …" —
+                kliknij niszę, aby zobaczyć historię miesięczną.
+              </p>
+            </div>
+            <VerticalProfitabilityTable rows={verticalRows} />
+          </section>
+        )}
 
         <div className="max-w-2xl rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
           <div className="mb-3">
