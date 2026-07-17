@@ -11,7 +11,7 @@ import { DataTable, SortableHeader } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { StatusBadge } from "@/components/status-badge";
 import { TableCell } from "@/components/ui/table";
-import { formatHours, formatMoney, formatPercent } from "@/lib/format";
+import { formatMoney, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface ProfitabilityRow {
@@ -19,13 +19,10 @@ export interface ProfitabilityRow {
   clientName: string;
   revenueGr: number;
   directCostsGr: number;
-  laborGr: number;
-  minutes: number;
   allocationGr: number;
   leadCostGr: number;
   profitGr: number;
   marginFraction: number | null;
-  effectiveRateGr: number | null;
 }
 
 export function ProfitabilityTable({
@@ -48,22 +45,16 @@ export function ProfitabilityTable({
   const totals = useMemo(() => {
     const revenueGr = rows.reduce((a, r) => a + r.revenueGr, 0);
     const directCostsGr = rows.reduce((a, r) => a + r.directCostsGr, 0);
-    const laborGr = rows.reduce((a, r) => a + r.laborGr, 0);
-    const minutes = rows.reduce((a, r) => a + r.minutes, 0);
     const allocationGr = rows.reduce((a, r) => a + r.allocationGr, 0);
     const leadCostGr = rows.reduce((a, r) => a + r.leadCostGr, 0);
     const profitGr = rows.reduce((a, r) => a + r.profitGr, 0);
     return {
       revenueGr,
       directCostsGr,
-      laborGr,
-      minutes,
       allocationGr,
       leadCostGr,
       profitGr,
       marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
-      effectiveRateGr:
-        minutes > 0 ? Math.round(revenueGr / (minutes / 60)) : null,
     };
   }, [rows]);
 
@@ -117,23 +108,6 @@ export function ProfitabilityTable({
             },
           ] as ColumnDef<ProfitabilityRow>[])
         : []),
-      {
-        accessorKey: "laborGr",
-        header: ({ column }) => (
-          <SortableHeader column={column} align="right">
-            Koszt pracy
-          </SortableHeader>
-        ),
-        meta: { align: "right" },
-        cell: ({ row }) => (
-          <div>
-            <div>{formatMoney(row.original.laborGr)}</div>
-            <div className="text-xs text-muted-foreground">
-              {formatHours(row.original.minutes)}
-            </div>
-          </div>
-        ),
-      },
     ];
 
     if (allocationEnabled) {
@@ -189,19 +163,6 @@ export function ProfitabilityTable({
           }
           return value;
         },
-      },
-      {
-        accessorKey: "effectiveRateGr",
-        header: ({ column }) => (
-          <SortableHeader column={column} align="right">
-            Efektywna stawka
-          </SortableHeader>
-        ),
-        meta: { align: "right" },
-        cell: ({ row }) =>
-          row.original.effectiveRateGr !== null
-            ? `${formatMoney(row.original.effectiveRateGr)}/h`
-            : "—",
       }
     );
 
@@ -221,7 +182,7 @@ export function ProfitabilityTable({
       emptyState={
         <EmptyState
           title="Brak danych w wybranym okresie"
-          description="Wystaw faktury, dodaj koszty przypisane do klientów lub zarejestruj czas pracy, aby zobaczyć rentowność. Możesz też zmienić okres w filtrze powyżej."
+          description="Wystaw faktury lub dodaj koszty przypisane do klientów, aby zobaczyć rentowność. Możesz też zmienić okres w filtrze powyżej."
         />
       }
       footer={
@@ -238,12 +199,6 @@ export function ProfitabilityTable({
               {formatMoney(totals.leadCostGr)}
             </TableCell>
           )}
-          <TableCell className="text-right font-medium tabular-nums">
-            <div>{formatMoney(totals.laborGr)}</div>
-            <div className="text-xs font-normal text-muted-foreground">
-              {formatHours(totals.minutes)}
-            </div>
-          </TableCell>
           {allocationEnabled && (
             <TableCell className="text-right font-medium tabular-nums">
               {formatMoney(totals.allocationGr)}
@@ -259,11 +214,6 @@ export function ProfitabilityTable({
           </TableCell>
           <TableCell className="text-right font-medium tabular-nums">
             {formatPercent(totals.marginFraction)}
-          </TableCell>
-          <TableCell className="text-right font-medium tabular-nums">
-            {totals.effectiveRateGr !== null
-              ? `${formatMoney(totals.effectiveRateGr)}/h`
-              : "—"}
           </TableCell>
         </>
       }

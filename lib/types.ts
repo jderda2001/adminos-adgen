@@ -134,7 +134,9 @@ export const DEFAULT_COST_CATEGORIES: ReadonlyArray<{
   { name: "Budżet reklamowy", isSalary: false, isAdBudget: true },
   // odłożone środki (koszt wewnętrzny — przelew na własne konto, poza zyskiem):
   { name: "Zaliczki na CIT / premie", isSalary: false, isDeferred: true },
-  { name: "Oszczędności", isSalary: false, isDeferred: true },
+  { name: "Odłożona gotówka - poduszka", isSalary: false, isDeferred: true },
+  { name: "Wartość inwestycji - akcje, obligacje", isSalary: false, isDeferred: true },
+  { name: "Wartość inwestycji - krypto", isSalary: false, isDeferred: true },
   { name: "Inne", isSalary: false },
 ];
 

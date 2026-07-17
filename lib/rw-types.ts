@@ -185,7 +185,10 @@ export function rwCategoriesInBucket(
 
 export const RW_MANUAL_METRICS = [
   { key: "zysk_estymacja", label: "Zysk — estymacja", unit: "zł" },
-  { key: "eth_saved", label: "Odłożone ETH", unit: "ETH" },
+  // wartość odłożonych środków (aktualizowana co miesiąc — do śledzenia zwrotu):
+  { key: "odlozona_gotowka", label: "Odłożona gotówka - poduszka", unit: "zł" },
+  { key: "wartosc_akcje", label: "Wartość inwestycji - akcje, obligacje", unit: "zł" },
+  { key: "eth_saved", label: "Wartość inwestycji - krypto", unit: "zł" },
   { key: "windykacja", label: "Kwota w windykacji", unit: "zł" },
   { key: "leady_marketing", label: "Leady z marketingu (CRM)", unit: "szt." },
   { key: "nowi_klienci", label: "Nowi klienci (podpisane umowy)", unit: "szt." },

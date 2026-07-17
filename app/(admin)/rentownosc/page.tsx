@@ -67,13 +67,10 @@ export default async function ProfitabilityPage({
     clientName: prof.clientNames.get(r.clientId) ?? "(nieznany klient)",
     revenueGr: r.revenueGr,
     directCostsGr: r.directCostsGr,
-    laborGr: r.laborGr,
-    minutes: r.minutes,
     allocationGr: r.allocationGr,
     leadCostGr: r.leadCostGr,
     profitGr: r.profitGr,
     marginFraction: r.marginFraction,
-    effectiveRateGr: r.effectiveRateGr,
   }));
 
   const revenueGr = rows.reduce((a, r) => a + r.revenueGr, 0);

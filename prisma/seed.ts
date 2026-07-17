@@ -30,7 +30,7 @@ const CAT_BOARD = "Wypłaty | Zarząd";
 const CAT_SUBS = "Abonamenty";
 const CAT_OPEX = "Pozostałe wydatki operacyjne";
 const CAT_SUBCONTRACTORS = "Podwykonawcy";
-const CAT_SAVINGS = "Oszczędności";
+const CAT_SAVINGS = "Odłożona gotówka - poduszka";
 const CAT_OTHER = "Inne";
 
 // ── Pomocnicze: daty ─────────────────────────────────────────────────

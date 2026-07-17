@@ -11,10 +11,8 @@ import {
 } from "@/lib/reports";
 import { resolvePeriod, type PeriodSearchParams } from "@/lib/periods";
 import { getAdBudgetCategoryIds, getSalaryCategoryIds } from "@/lib/settings";
-import { effectiveRateGr, laborCostGr } from "@/lib/calc";
 import {
   formatDate,
-  formatHours,
   formatMoney,
   formatMonth,
   formatPercent,
@@ -64,7 +62,7 @@ export default async function ClientProfitabilityPage({
     getAdBudgetCategoryIds(),
   ]);
 
-  const [prof, monthly, leadCosts, invoices, costs, entries, users] = await Promise.all([
+  const [prof, monthly, leadCosts, invoices, costs] = await Promise.all([
     getClientProfitability(period),
     getClientMonthlyProfit(client.id, 12),
     getClientLeadCosts(client.id, period),
@@ -93,11 +91,6 @@ export default async function ClientProfitabilityPage({
         category: { select: { name: true } },
       },
     }),
-    db.timeEntry.findMany({
-      where: { clientId: client.id, date: { gte: period.from, lt: period.to } },
-      select: { userId: true, minutes: true, date: true },
-    }),
-    db.user.findMany({ select: { id: true, name: true, rates: true } }),
   ]);
 
   const row = prof.rows.find((r) => r.clientId === client.id);
@@ -105,41 +98,10 @@ export default async function ClientProfitabilityPage({
     revenueGr: row?.revenueGr ?? 0,
     profitGr: row?.profitGr ?? 0,
     marginFraction: row?.marginFraction ?? null,
-    minutes: row?.minutes ?? 0,
-    effectiveRateGr: row?.effectiveRateGr ?? null,
   };
-
-  // czas pracy zagregowany per osoba — koszt pracy liczony per wpis
-  // wg stawki obowiązującej w dniu wpisu (effectiveRateGr / laborCostGr)
-  const ratesByUser = new Map(users.map((u) => [u.id, u.rates]));
-  const nameByUser = new Map(users.map((u) => [u.id, u.name]));
-  const laborByUser = new Map<string, { minutes: number; laborGr: number }>();
-  for (const e of entries) {
-    const rate = effectiveRateGr(ratesByUser.get(e.userId) ?? [], e.date);
-    const prev = laborByUser.get(e.userId) ?? { minutes: 0, laborGr: 0 };
-    laborByUser.set(e.userId, {
-      minutes: prev.minutes + e.minutes,
-      laborGr: prev.laborGr + laborCostGr(e.minutes, rate),
-    });
-  }
-  const laborRows = [...laborByUser.entries()]
-    .map(([userId, v]) => ({
-      userId,
-      name: nameByUser.get(userId) ?? "(nieznana osoba)",
-      minutes: v.minutes,
-      laborGr: v.laborGr,
-    }))
-    .sort((a, b) => b.laborGr - a.laborGr);
 
   const invoicesNetSumGr = invoices.reduce((a, i) => a + i.netGr, 0);
   const costsNetSumGr = costs.reduce((a, c) => a + c.netGr, 0);
-  const laborSum = laborRows.reduce(
-    (acc, r) => ({
-      minutes: acc.minutes + r.minutes,
-      laborGr: acc.laborGr + r.laborGr,
-    }),
-    { minutes: 0, laborGr: 0 }
-  );
 
   return (
     <>
@@ -166,7 +128,7 @@ export default async function ClientProfitabilityPage({
       </PageHeader>
 
       <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <KpiCard label="Przychody" value={formatMoney(kpi.revenueGr)} />
           <KpiCard
             label="Zysk"
@@ -180,16 +142,6 @@ export default async function ClientProfitabilityPage({
             }
           />
           <KpiCard label="Marża" value={formatPercent(kpi.marginFraction)} />
-          <KpiCard label="Godziny" value={formatHours(kpi.minutes)} />
-          <KpiCard
-            label="Efektywna stawka"
-            value={
-              kpi.effectiveRateGr !== null
-                ? `${formatMoney(kpi.effectiveRateGr)}/h`
-                : "—"
-            }
-            sub="przychody / godziny"
-          />
         </div>
 
         <div className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
@@ -201,8 +153,8 @@ export default async function ClientProfitabilityPage({
           </p>
           <ClientMonthlyChart data={monthly} />
           <p className="mt-2 text-xs text-muted-foreground">
-            Koszty obejmują koszty bezpośrednie i koszt pracy z godzin (bez
-            kategorii „wynagrodzenia” i bez alokacji kosztów ogólnych).
+            Koszty obejmują koszty bezpośrednie i koszt leadów (bez kategorii
+            „wynagrodzenia” i bez alokacji kosztów ogólnych).
           </p>
         </div>
 
@@ -413,61 +365,6 @@ export default async function ClientProfitabilityPage({
             </p>
           </section>
         )}
-
-        <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
-          <h2 className="font-heading text-base font-semibold">
-            Czas pracy w okresie — per osoba
-          </h2>
-          <div className="mt-3 overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Osoba</TableHead>
-                  <TableHead className="text-right">Godziny</TableHead>
-                  <TableHead className="text-right">Koszt pracy</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {laborRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={3}
-                      className="py-8 text-center text-sm text-muted-foreground"
-                    >
-                      Brak zarejestrowanego czasu pracy dla tego klienta w
-                      wybranym okresie.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  laborRows.map((r) => (
-                    <TableRow key={r.userId}>
-                      <TableCell className="font-medium">{r.name}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatHours(r.minutes)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatMoney(r.laborGr)}
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-              {laborRows.length > 0 && (
-                <TableFooter>
-                  <TableRow>
-                    <TableCell className="font-medium">Suma</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {formatHours(laborSum.minutes)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums">
-                      {formatMoney(laborSum.laborGr)}
-                    </TableCell>
-                  </TableRow>
-                </TableFooter>
-              )}
-            </Table>
-          </div>
-        </section>
       </div>
     </>
   );

@@ -8,7 +8,25 @@
 import { db } from "../lib/db";
 import { DEFAULT_COST_CATEGORIES } from "../lib/types";
 
+// Zmiany nazw kategorii (audyt 2026-07): stara nazwa → nowa. Rename zachowuje
+// przypisane koszty i historię (upsert-po-nazwie tworzyłby nową, osieroconą).
+// Wykonywane tylko gdy stara istnieje, a nowa jeszcze nie.
+const RENAMES: Record<string, string> = {
+  Oszczędności: "Odłożona gotówka - poduszka",
+};
+
 async function main() {
+  for (const [oldName, newName] of Object.entries(RENAMES)) {
+    const [oldCat, newCat] = await Promise.all([
+      db.costCategory.findUnique({ where: { name: oldName } }),
+      db.costCategory.findUnique({ where: { name: newName } }),
+    ]);
+    if (oldCat && !newCat) {
+      await db.costCategory.update({ where: { id: oldCat.id }, data: { name: newName } });
+      console.log(`Zmieniono nazwę kategorii: „${oldName}" → „${newName}" (koszty zachowane)`);
+    }
+  }
+
   const maxPos = (await db.costCategory.aggregate({ _max: { position: true } }))._max.position ?? 0;
   let pos = maxPos;
   for (const def of DEFAULT_COST_CATEGORIES) {
