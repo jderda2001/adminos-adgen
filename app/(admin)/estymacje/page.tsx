@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { PageHeader } from "@/components/page-header";
 import { buildForecast } from "@/lib/forecast";
+import { getLeadForecastData } from "@/lib/reports";
 import { loadForecastInput, type Horizon } from "./forecast-data";
 import { EstymacjeView } from "./estymacje-view";
 
@@ -30,9 +31,10 @@ export default async function EstymacjePage({
   const result = buildForecast(input);
 
   // dodatkowe zapytania na potrzeby widoku (nie wchodzą do silnika)
-  const [snapshots, events] = await Promise.all([
+  const [snapshots, events, leadForecast] = await Promise.all([
     db.cashSnapshot.findMany({ orderBy: { date: "desc" }, take: 6 }),
     db.finPlanEvent.findMany({ where: { period: { gte: input.todayIso.slice(0, 7) } }, orderBy: { period: "asc" } }),
+    getLeadForecastData(3),
   ]);
 
   const clientNames: Record<string, string> = {};
@@ -62,6 +64,7 @@ export default async function EstymacjePage({
           note: e.note,
         }))}
         newBusinessGr={input.assumptions.newBusinessMonthlyGr}
+        leadForecast={leadForecast}
         clientNames={clientNames}
         aiEnabled={Boolean(process.env.ANTHROPIC_API_KEY)}
       />

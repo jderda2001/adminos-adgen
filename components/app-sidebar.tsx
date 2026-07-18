@@ -10,6 +10,7 @@ import {
   Banknote,
   Receipt,
   Target,
+  Wallet,
   CreditCard,
   TrendingUp,
   Building2,
@@ -37,6 +38,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/rachunek-wynikow", label: "Rachunek wyników", icon: LineChart },
       { href: "/estymacje", label: "Estymacje", icon: ChartSpline },
+      { href: "/budzet", label: "Budżet", icon: Wallet },
     ],
   },
   {

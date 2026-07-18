@@ -31,6 +31,7 @@ import {
 } from "./settings";
 import { computeVatFromNet } from "./calc";
 import { RW_CATEGORIES } from "./rw-types";
+import type { LeadForecastData } from "./lead-forecast";
 import { isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
@@ -716,6 +717,51 @@ export async function getVerticalMonthlyProfit(
   });
 }
 
+// ── Dane wejściowe do prognozy leadów (moduł Estymacje) ─────────────
+
+/**
+ * Historia leadów do prognozy: dostawy + kampanie z ostatnich n miesięcy oraz
+ * najświeższa cena jednostkowa netto per wertykal (z faktur „Leady: <wertykal>"
+ * z wypełnionym leadUnitPriceGr). Silnik: lib/lead-forecast.ts.
+ */
+export async function getLeadForecastData(n = 3): Promise<LeadForecastData> {
+  const historyMonths = lastMonths(n);
+  const { from, to } = lastMonthsRange(n);
+  const [deliveries, campaigns, pricedInvoices] = await Promise.all([
+    db.leadDelivery.findMany({
+      where: { period: { in: historyMonths } },
+      select: { period: true, vertical: true, leadsCount: true },
+    }),
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: historyMonths } },
+      select: { period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
+    // najświeższa cena za lead per wertykal — z ostatnich 12 mies. (nie tylko okna run-rate)
+    db.invoice.findMany({
+      where: {
+        ...REVENUE_WHERE,
+        leadUnitPriceGr: { not: null },
+        offerTags: { contains: LEAD_TAG_PREFIX },
+        saleDate: { gte: new Date(to.getTime() - 365 * 86_400_000), lt: to },
+      },
+      orderBy: { saleDate: "desc" },
+      select: { saleDate: true, leadUnitPriceGr: true, offerTags: true },
+    }),
+  ]);
+  void from;
+
+  const unitPriceByVertical: Record<string, number> = {};
+  for (const inv of pricedInvoices) {
+    const v = verticalFromOfferTags(inv.offerTags);
+    // pierwsza (najświeższa) cena wygrywa — invoices posortowane malejąco po dacie
+    if (v && inv.leadUnitPriceGr != null && unitPriceByVertical[v] === undefined) {
+      unitPriceByVertical[v] = inv.leadUnitPriceGr;
+    }
+  }
+
+  return { historyMonths, deliveries, campaigns, unitPriceByVertical };
+}
+
 // ── Uzgodnienie rejestrów: RW (kasowo, z wyciągów) vs Przychody/Koszty ──
 
 // Kategorie RW odłożone/podatkowe (ODLOZONE + CIT) — transfery wewnętrzne i
@@ -804,6 +850,73 @@ export async function getLedgerReconciliation(
   }
 
   return { year, rows };
+}
+
+// ── Budżet: plan vs wykonanie (moduł Budżet) ────────────────────────
+
+export interface BudgetVsActualRow {
+  period: string; // "RRRR-MM"
+  month: number; // 1–12
+  revenuePlanGr: number;
+  revenueActualGr: number;
+  costPlanGr: number;
+  costActualGr: number;
+  leadsPlan: number | null;
+  leadsActual: number;
+  note: string | null;
+}
+
+/**
+ * Plan (MonthlyBudget) vs wykonanie za rok, per miesiąc. Wykonanie:
+ * przychód = faktury (bez DRAFT, po saleDate), koszt = Cost (COST_WHERE, po
+ * docDate), leady = Σ LeadDelivery. Marża/delty liczy UI.
+ */
+export async function getBudgetVsActual(year: number): Promise<BudgetVsActualRow[]> {
+  const from = new Date(Date.UTC(year, 0, 1));
+  const to = new Date(Date.UTC(year + 1, 0, 1));
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+
+  const [budgets, invoices, costs, deliveries] = await Promise.all([
+    db.monthlyBudget.findMany({ where: { period: { in: months } } }),
+    db.invoice.findMany({
+      where: { ...REVENUE_WHERE, saleDate: { gte: from, lt: to } },
+      select: { saleDate: true, netGr: true },
+    }),
+    db.cost.findMany({
+      where: { ...COST_WHERE, docDate: { gte: from, lt: to } },
+      select: { docDate: true, netGr: true },
+    }),
+    db.leadDelivery.findMany({
+      where: { period: { in: months } },
+      select: { period: true, leadsCount: true },
+    }),
+  ]);
+
+  const budgetByPeriod = new Map(budgets.map((b) => [b.period, b]));
+  const revActual = new Array(12).fill(0);
+  const costActual = new Array(12).fill(0);
+  const leadsActual = new Array(12).fill(0);
+  for (const inv of invoices) revActual[inv.saleDate.getUTCMonth()] += inv.netGr;
+  for (const c of costs) costActual[c.docDate.getUTCMonth()] += c.netGr;
+  for (const d of deliveries) {
+    const idx = Number(d.period.slice(5, 7)) - 1;
+    if (idx >= 0 && idx < 12) leadsActual[idx] += d.leadsCount;
+  }
+
+  return months.map((period, i) => {
+    const b = budgetByPeriod.get(period);
+    return {
+      period,
+      month: i + 1,
+      revenuePlanGr: b?.revenuePlanGr ?? 0,
+      revenueActualGr: revActual[i],
+      costPlanGr: b?.costPlanGr ?? 0,
+      costActualGr: costActual[i],
+      leadsPlan: b?.leadsPlan ?? null,
+      leadsActual: leadsActual[i],
+      note: b?.note ?? null,
+    };
+  });
 }
 
 // ── Koszty cykliczne — leniwe generowanie miesięcznych kopii ────────

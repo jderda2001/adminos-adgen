@@ -13,6 +13,8 @@ import { ForecastTable } from "./forecast-table";
 import { PaymentStatsTable } from "./payment-stats-table";
 import { EventsEditor, type PlanEventRow } from "./events-editor";
 import { NewBusinessCard } from "./new-business-card";
+import { LeadForecastCard } from "./lead-forecast-card";
+import type { LeadForecastData } from "@/lib/lead-forecast";
 import { AiPanel } from "./ai-panel";
 
 const HORIZONS = [3, 6, 12] as const;
@@ -23,6 +25,7 @@ export function EstymacjeView({
   snapshots,
   events,
   newBusinessGr,
+  leadForecast,
   clientNames,
   aiEnabled,
 }: {
@@ -31,6 +34,7 @@ export function EstymacjeView({
   snapshots: SnapshotRow[];
   events: PlanEventRow[];
   newBusinessGr: number;
+  leadForecast: LeadForecastData;
   clientNames: Record<string, string>;
   aiEnabled: boolean;
 }) {
@@ -128,6 +132,9 @@ export function EstymacjeView({
           <span className="font-semibold capitalize">{kpis.firstNegativePeriod}</span>.
         </div>
       )}
+
+      {/* prognoza leadów — sprzężenie sprzedaży leadów z kosztem reklamowym */}
+      <LeadForecastCard data={leadForecast} horizon={horizon} />
 
       {/* analiza AI (doradcza) */}
       {aiEnabled && (

@@ -257,6 +257,19 @@ model ActiveTimer {
   startedAt   DateTime @default(now())
 }
 
+// Budżet miesięczny (plan) firmy — zamrażany na początek miesiąca, porównywany
+// z wykonaniem (faktury/koszty/dostawy leadów) w module Budżet. Kwoty NETTO gr.
+model MonthlyBudget {
+  id            String   @id @default(cuid())
+  period        String   @unique // "RRRR-MM"
+  revenuePlanGr Int      @default(0)
+  costPlanGr    Int      @default(0)
+  leadsPlan     Int?     // plan dostarczonych leadów (opcjonalny)
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 // Miesięczna uwaga do klienta w planie przychodów (np. "w tym miesiącu brak prowizji")
 model RevenuePlanNote {
   id       String @id @default(cuid())
