@@ -8,6 +8,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { isAiEnabled } from "./rw-ai";
 import type { ForecastResult, AiMonthAdjustment, ForecastAiReview } from "./forecast";
+import type { LeadForecastResult } from "./lead-forecast";
 
 export { isAiEnabled };
 export type { ForecastAiReview };
@@ -27,20 +28,60 @@ export function buildForecastSystemPrompt(): string {
     "na kolejne miesiące oraz historię. Twoje zadanie: ocenić realizm i zaproponować",
     "korekty oraz ryzyka — NIE zastępujesz baseline'u, komentujesz go.",
     "",
+    "Model biznesu: to agencja LEADOWA. Większość przychodu to sprzedaż paczek",
+    "leadów generowanych przez wewnętrzne marki (kampanie Meta). Kluczowa mechanika:",
+    "przychód z leadów zależy od WOLUMENU i CENY za lead, a głównym zmiennym kosztem",
+    "jest BUDŻET REKLAMOWY (koszt = leady × CPL). Blok „leady” w danych pokazuje",
+    "run-rate per wertykal (leady/mies, CPL, cena, przychód, koszt reklamowy, marża).",
+    "",
     "Zasady:",
     "- Korekty podajesz jako procent na miesiąc: revenueAdjPct (przychody ZAKŁADANE,",
     "  nie umowne) i costAdjPct (koszty bazowe operacyjne). Zakres −30…30. 0 = bez zmian.",
     "- Bądź konserwatywny: łatwiej zawyżyć przychód i zaniżyć koszt niż odwrotnie.",
     "- Uwzględnij sezonowość, zaległości, wątpliwe należności, punktualność płatności.",
+    "- Dla leadów: jeśli marża/lead jest cienka lub CPL rośnie, ostrożnie z przychodem",
+    "  ZAKŁADANYM i pamiętaj, że skalowanie sprzedaży leadów podnosi też koszt reklamowy",
+    "  (nie zakładaj wzrostu przychodu z leadów bez proporcjonalnego wzrostu kosztu).",
+    "  W risks nazywaj konkrety: rosnący CPL, uzależnienie od jednego wertykalu,",
+    "  wertykale bez ceny/kampanii, ujemna lub niska marża na leadzie.",
     "- narrative: 3–6 zdań po polsku, konkret. risks: krótkie punkty (najwyżej 8).",
     "- confidence: high/medium/low — jak pewny jesteś oceny przy tych danych.",
     "- Wszystkie kwoty w danych są w PLN (zł).",
   ].join("\n");
 }
 
-export function buildForecastPayload(result: ForecastResult): unknown {
+export function buildForecastPayload(
+  result: ForecastResult,
+  leadForecast?: LeadForecastResult | null
+): unknown {
+  const leady =
+    leadForecast && leadForecast.perVertical.length > 0
+      ? {
+          opis:
+            "Steady-state run-rate/mies. sprzedaży leadów. Koszt reklamowy = leady × CPL " +
+            "(budżet Meta) to główny zmienny koszt — skaluje się z wolumenem leadów.",
+          per_wertykal: leadForecast.perVertical.map((v) => ({
+            wertykal: v.vertical,
+            leady_mies: v.leadsPerMonth,
+            cpl_zl: v.cplGr === null ? null : zl(v.cplGr),
+            cena_lead_zl: v.unitPriceGr === null ? null : zl(v.unitPriceGr),
+            przychod_mies_zl: v.revenueGr === null ? null : zl(v.revenueGr),
+            koszt_reklamowy_mies_zl: zl(v.adCostGr),
+            marza_mies_zl: v.marginGr === null ? null : zl(v.marginGr),
+          })),
+          razem_mies: {
+            leady: leadForecast.totals.leadsPerMonth,
+            przychod_zl: zl(leadForecast.totals.revenueGr),
+            koszt_reklamowy_zl: zl(leadForecast.totals.adCostGr),
+            marza_zl: zl(leadForecast.totals.marginGr),
+            niepelna_cena: leadForecast.totals.hasUnknownPrice,
+          },
+        }
+      : null;
+
   return {
     okresy: result.periods,
+    leady,
     pnl: result.pnl.map((m) => ({
       okres: m.period,
       przychody_zl: zl(m.revenueNetGr),
@@ -145,7 +186,10 @@ export function validateForecastAiOutput(raw: unknown, periods: string[]): Forec
 // ── wywołanie API ────────────────────────────────────────────────────
 
 /** Analiza prognozy przez Claude. Rzuca błędy SDK (obsługa w akcji). */
-export async function aiReviewForecast(result: ForecastResult): Promise<ForecastAiReview> {
+export async function aiReviewForecast(
+  result: ForecastResult,
+  leadForecast?: LeadForecastResult | null
+): Promise<ForecastAiReview> {
   const client = new Anthropic(); // ANTHROPIC_API_KEY z env
   const response = await client.messages.create({
     model: MODEL(),
@@ -159,7 +203,7 @@ export async function aiReviewForecast(result: ForecastResult): Promise<Forecast
       {
         role: "user",
         content: `Oceń prognozę i zaproponuj korekty oraz ryzyka:\n${JSON.stringify(
-          buildForecastPayload(result)
+          buildForecastPayload(result, leadForecast)
         )}`,
       },
     ],

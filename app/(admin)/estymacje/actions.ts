@@ -13,6 +13,8 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { dateFromInput, parseMoneyToGr } from "@/lib/format";
 import { PLAN_EVENT_KINDS, buildForecast } from "@/lib/forecast";
 import { isAiEnabled, aiReviewForecast, type ForecastAiReview } from "@/lib/forecast-ai";
+import { getLeadForecastData } from "@/lib/reports";
+import { buildLeadForecast } from "@/lib/lead-forecast";
 import { loadForecastInput, type Horizon } from "./forecast-data";
 
 const PATH = "/estymacje";
@@ -151,7 +153,13 @@ export async function aiForecastAction(horizon: number): Promise<AiForecastResul
   try {
     const input = await loadForecastInput(h);
     const baseline = buildForecast(input);
-    const review = await aiReviewForecast(baseline);
+    // ekonomika leadów (baseline run-rate, bez scenariusza) do kontekstu CFO
+    const leadData = await getLeadForecastData(3);
+    const leadForecast = buildLeadForecast({
+      ...leadData,
+      scenario: { cplMultiplier: 1, volumeMultiplier: 1 },
+    });
+    const review = await aiReviewForecast(baseline, leadForecast);
     return { ok: true, review };
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) return { ok: false, error: "Błędny klucz API Anthropic" };
