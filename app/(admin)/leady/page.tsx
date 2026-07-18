@@ -67,6 +67,13 @@ export default async function LeadyPage({
 
   const unassignedGr = data.bookedAdCostsGr - data.totals.assignedCostGr;
 
+  // wertykale z użyteczną kampanią (leady>0) — do ostrzeżeń o dostawach bez wyceny
+  const verticalsWithCampaign = [
+    ...new Set(data.campaigns.filter((c) => c.leadsCount > 0).map((c) => c.vertical)),
+  ];
+  // dostawy, które nie mają z czego policzyć CPL (koszt 0) — do zbiorczego alertu
+  const unpricedDeliveries = data.deliveries.filter((d) => d.source === "BRAK_KAMPANII");
+
   return (
     <>
       <PageHeader
@@ -114,12 +121,27 @@ export default async function LeadyPage({
           />
         </div>
 
+        {unpricedDeliveries.length > 0 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            {unpricedDeliveries.length}{" "}
+            {unpricedDeliveries.length === 1
+              ? "dostawa nie ma kampanii do wyceny"
+              : "dostaw nie ma kampanii do wyceny"}{" "}
+            (koszt 0 zł) — wpisz kampanię dla wertykali:{" "}
+            <span className="font-medium">
+              {[...new Set(unpricedDeliveries.map((d) => d.vertical))].join(", ")}
+            </span>
+            . Do tego czasu koszt leadów tych klientów jest zaniżony.
+          </div>
+        )}
+
         <CampaignsCard month={month} campaigns={data.campaigns} brands={brands} />
         <DeliveriesCard
           month={month}
           deliveries={data.deliveries}
           brands={brands}
           clients={clients}
+          verticalsWithCampaign={verticalsWithCampaign}
         />
         <ReconciliationCard
           campaignSpendGr={data.totals.spendGr}

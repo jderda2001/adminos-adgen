@@ -105,7 +105,7 @@ function parseCostForm(
   }
 
   const netGr = parseMoneyToGr(d.net);
-  if (netGr === null) {
+  if (netGr === null || netGr < 0) {
     return { success: false, error: "Podaj poprawną kwotę netto, np. 1 234,56" };
   }
 

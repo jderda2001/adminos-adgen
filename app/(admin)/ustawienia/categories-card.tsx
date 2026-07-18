@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Check, Megaphone, Plus, Trash2, Wallet } from "lucide-react";
+import { Check, Megaphone, PiggyBank, Plus, Trash2, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import {
   deleteCategoryAction,
   renameCategoryAction,
   toggleAdBudgetCategoryAction,
+  toggleDeferredCategoryAction,
   toggleSalaryCategoryAction,
 } from "./actions";
 
@@ -40,12 +41,15 @@ export interface CategoryRow {
   recurringCount: number;
   isSalary: boolean; // kategoria wynagrodzeń — poza kosztami bezpośrednimi i alokacją
   isAdBudget: boolean; // budżet reklamowy — poza direct/alokacją; klientom liczony koszt leadów
+  isDeferred: boolean; // odłożone — transfer wewnętrzny (poduszka/inwestycje/CIT), poza zyskiem i zobowiązaniami
 }
 
 const SALARY_TOOLTIP =
   "Rozliczana kosztem pracy z godzin — poza kosztami bezpośrednimi i alokacją w rentowności";
 const ADBUDGET_TOOLTIP =
   "Budżet reklamowy — koszty poza kosztami bezpośrednimi i alokacją; klientom przypisywany jest koszt leadów z modułu Leady";
+const DEFERRED_TOOLTIP =
+  "Odłożona — transfer na własne konto (poduszka, inwestycje, zaliczki CIT). Poza zyskiem/rentownością i poza zobowiązaniami do zapłaty";
 
 function usageLabel(c: CategoryRow): string {
   const parts = [
@@ -108,6 +112,14 @@ function CategoryItem({
     });
   }
 
+  function handleToggleDeferred(next: boolean) {
+    startTransition(async () => {
+      const result = await toggleDeferredCategoryAction(category.id, next);
+      if (result.ok) toast.success(result.message);
+      else toast.error(result.error);
+    });
+  }
+
   function handleDeleteClick() {
     if (usage > 0) {
       toast.error(
@@ -155,6 +167,18 @@ function CategoryItem({
           <TooltipContent>{ADBUDGET_TOOLTIP}</TooltipContent>
         </Tooltip>
       )}
+      {category.isDeferred && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="cursor-help">
+              <StatusBadge tone="amber">
+                <PiggyBank className="size-3" /> odłożona
+              </StatusBadge>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{DEFERRED_TOOLTIP}</TooltipContent>
+        </Tooltip>
+      )}
       <span className="w-36 shrink-0 text-right text-xs text-muted-foreground">
         {usageLabel(category)}
       </span>
@@ -183,6 +207,19 @@ function CategoryItem({
           </div>
         </TooltipTrigger>
         <TooltipContent>{ADBUDGET_TOOLTIP}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex shrink-0 items-center">
+            <Switch
+              checked={category.isDeferred}
+              onCheckedChange={handleToggleDeferred}
+              disabled={pending}
+              aria-label={`Oznacz „${category.name}” jako odłożoną`}
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{DEFERRED_TOOLTIP}</TooltipContent>
       </Tooltip>
       <div className="flex w-16 shrink-0 justify-end gap-1">
         <Button

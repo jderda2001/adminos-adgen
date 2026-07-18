@@ -258,10 +258,19 @@ export function PayablesTable({ payables }: { payables: PayableRow[] }) {
         link.click();
         link.remove();
         URL.revokeObjectURL(url);
+        // Domknięcie pętli: po wysłaniu paczki do banku oznacz te koszty jako
+        // opłacone — inaczej zostaną „do zapłaty"/przeterminowane.
         toast.success(
           ids.length === 1
             ? "Wygenerowano paczkę z 1 przelewem"
-            : `Wygenerowano paczkę z ${ids.length} przelewami`
+            : `Wygenerowano paczkę z ${ids.length} przelewami`,
+          {
+            duration: 12000,
+            action: {
+              label: "Oznacz jako opłacone",
+              onClick: () => markPaid(ids),
+            },
+          }
         );
       } else {
         const data = (await response.json().catch(() => null)) as {

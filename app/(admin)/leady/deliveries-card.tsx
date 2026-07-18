@@ -59,11 +59,14 @@ export function DeliveriesCard({
   deliveries,
   brands,
   clients,
+  verticalsWithCampaign,
 }: {
   month: string;
   deliveries: DeliveryRow[];
   brands: BrandOption[];
   clients: ClientOption[];
+  /** wertykale z kampanią (leady>0) w tym miesiącu — do ostrzeżenia „brak kampanii" */
+  verticalsWithCampaign: string[];
 }) {
   const [toDelete, setToDelete] = useState<DeliveryRow | null>(null);
   const [pending, startTransition] = useTransition();
@@ -94,6 +97,7 @@ export function DeliveriesCard({
           month={month}
           brands={brands}
           clients={clients}
+          verticalsWithCampaign={verticalsWithCampaign}
           trigger={
             <Button size="sm">
               <Plus className="size-4" /> Dodaj dostawę
@@ -147,6 +151,7 @@ export function DeliveriesCard({
                       month={month}
                       brands={brands}
                       clients={clients}
+                      verticalsWithCampaign={verticalsWithCampaign}
                       delivery={{
                         id: d.id,
                         clientId: d.clientId,

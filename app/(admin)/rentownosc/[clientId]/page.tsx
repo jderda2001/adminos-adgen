@@ -79,6 +79,7 @@ export default async function ClientProfitabilityPage({
       where: {
         clientId: client.id,
         needsConfirmation: false,
+        category: { isDeferred: false },
         categoryId: { notIn: [...salaryCategoryIds, ...adBudgetCategoryIds] },
         docDate: { gte: period.from, lt: period.to },
       },

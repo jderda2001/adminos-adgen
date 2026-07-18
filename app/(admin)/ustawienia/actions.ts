@@ -252,6 +252,9 @@ export async function toggleSalaryCategoryAction(
   if (isSalary && category.isAdBudget) {
     return fail("Kategoria budżetu reklamowego nie może być jednocześnie wynagrodzeniami");
   }
+  if (isSalary && category.isDeferred) {
+    return fail("Kategoria odłożona nie może być jednocześnie wynagrodzeniami");
+  }
   await db.costCategory.update({ where: { id }, data: { isSalary } });
 
   revalidatePath("/ustawienia");
@@ -275,6 +278,9 @@ export async function toggleAdBudgetCategoryAction(
   if (isAdBudget && category.isSalary) {
     return fail("Kategoria wynagrodzeń nie może być jednocześnie budżetem reklamowym");
   }
+  if (isAdBudget && category.isDeferred) {
+    return fail("Kategoria odłożona nie może być jednocześnie budżetem reklamowym");
+  }
 
   await db.costCategory.update({ where: { id }, data: { isAdBudget } });
 
@@ -286,5 +292,38 @@ export async function toggleAdBudgetCategoryAction(
     isAdBudget
       ? "Kategoria oznaczona jako budżet reklamowy"
       : "Zdjęto oznaczenie budżetu reklamowego z kategorii"
+  );
+}
+
+/**
+ * Włącza/wyłącza flagę „odłożone" (isDeferred) — koszt wewnętrzny/transfer na
+ * własne konto (poduszka, inwestycje, zaliczki CIT). NIE liczony jako koszt
+ * zewnętrzny w zysku/rentowności ani jako zobowiązanie do zapłaty.
+ */
+export async function toggleDeferredCategoryAction(
+  id: string,
+  isDeferred: boolean
+): Promise<ActionResult> {
+  await requireAdmin();
+
+  const category = await db.costCategory.findUnique({ where: { id } });
+  if (!category) return fail("Kategoria nie istnieje");
+  if (isDeferred && category.isSalary) {
+    return fail("Kategoria wynagrodzeń nie może być jednocześnie odłożona");
+  }
+  if (isDeferred && category.isAdBudget) {
+    return fail("Kategoria budżetu reklamowego nie może być jednocześnie odłożona");
+  }
+
+  await db.costCategory.update({ where: { id }, data: { isDeferred } });
+
+  revalidatePath("/ustawienia");
+  revalidatePath("/rentownosc");
+  revalidatePath("/dashboard");
+  revalidatePath("/platnosci");
+  return ok(
+    isDeferred
+      ? "Kategoria oznaczona jako odłożona (koszt wewnętrzny)"
+      : "Zdjęto oznaczenie „odłożona” z kategorii"
   );
 }

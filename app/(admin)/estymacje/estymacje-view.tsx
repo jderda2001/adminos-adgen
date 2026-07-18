@@ -12,6 +12,7 @@ import { CashChart } from "./cash-chart";
 import { ForecastTable } from "./forecast-table";
 import { PaymentStatsTable } from "./payment-stats-table";
 import { EventsEditor, type PlanEventRow } from "./events-editor";
+import { NewBusinessCard } from "./new-business-card";
 import { AiPanel } from "./ai-panel";
 
 const HORIZONS = [3, 6, 12] as const;
@@ -21,6 +22,7 @@ export function EstymacjeView({
   horizon,
   snapshots,
   events,
+  newBusinessGr,
   clientNames,
   aiEnabled,
 }: {
@@ -76,10 +78,11 @@ export function EstymacjeView({
         </div>
       </div>
 
-      {/* stan kont + zdarzenia */}
+      {/* stan kont + zdarzenia + założenie nowego biznesu */}
       <div className="grid gap-4 lg:grid-cols-2">
         <SnapshotCard snapshots={snapshots} stale={snapshotStale} />
         <EventsEditor events={events} />
+        <NewBusinessCard newBusinessGr={newBusinessGr} />
       </div>
 
       {/* KPI */}

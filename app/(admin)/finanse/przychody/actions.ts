@@ -225,6 +225,12 @@ export async function updateInvoiceAction(
     }
   }
 
+  // status edytowalny również przy edycji (ścieżka wyjścia z „Czekamy"/„Nie
+  // wystawiona"); paidDate spójny ze statusem
+  const status = d.status ?? existing.status;
+  const paidDate =
+    status === "PAID" ? (existing.paidDate ?? d.saleDate) : null;
+
   // Rejestr trzyma pojedynczą kwotę zbiorczą — usuwamy ewentualne stare pozycje
   await db.$transaction([
     db.invoiceItem.deleteMany({ where: { invoiceId: id } }),
@@ -237,6 +243,8 @@ export async function updateInvoiceAction(
         issueDate: d.saleDate,
         saleDate: d.saleDate,
         dueDate: d.dueDate,
+        status,
+        paidDate,
         netGr: d.netGr,
         vatGr: d.vatGr,
         grossGr: d.grossGr,

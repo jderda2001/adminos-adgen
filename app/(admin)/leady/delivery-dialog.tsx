@@ -53,12 +53,14 @@ export function DeliveryDialog({
   month,
   brands,
   clients,
+  verticalsWithCampaign,
   delivery,
   trigger,
 }: {
   month: string;
   brands: BrandOption[];
   clients: ClientOption[];
+  verticalsWithCampaign: string[];
   /** undefined = nowa dostawa */
   delivery?: DeliveryFormData;
   trigger: ReactNode;
@@ -186,6 +188,14 @@ export function DeliveryDialog({
               </Select>
             </div>
           </div>
+
+          {vertical && !verticalsWithCampaign.includes(vertical) && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              Brak kampanii dla wertykalu „{vertical}" w tym miesiącu — koszt
+              leadów wyniesie <span className="font-semibold">0 zł</span> (źródło
+              „brak kampanii"). Dodaj najpierw kampanię, aby policzyć CPL.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">

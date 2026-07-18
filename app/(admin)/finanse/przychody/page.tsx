@@ -102,6 +102,9 @@ export default async function RevenuesPage({
   // „Zafakturowane niezapłacone" = wysłane + przeterminowane; „Zapłacone" = PAID.
   const kpis: RevenueKpis = rows.reduce<RevenueKpis>(
     (acc, r) => {
+      // Szkice (DRAFT) nie są przychodem — spójnie z Dashboardem/Rentownością
+      // (REVENUE_WHERE wyklucza DRAFT). W tabeli poniżej pozostają widoczne.
+      if (r.status === "DRAFT") return acc;
       acc.netGr += r.netGr;
       acc.grossGr += r.grossGr;
       if (r.status === "PAID") acc.paidNetGr += r.netGr;

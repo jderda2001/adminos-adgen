@@ -28,7 +28,9 @@ export default async function PaymentsPage({
 
   const [costs, invoices] = await Promise.all([
     db.cost.findMany({
-      where: { paid: false, needsConfirmation: false },
+      // Kategorie odłożone (isDeferred) to transfery wewnętrzne, nie zobowiązania
+      // do zapłaty przez Elixir — poza listą „Do zapłaty".
+      where: { paid: false, needsConfirmation: false, category: { isDeferred: false } },
       include: { category: true },
       orderBy: { dueDate: "asc" },
     }),

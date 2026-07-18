@@ -94,9 +94,16 @@ export async function getDashboardData(period: Period): Promise<DashboardData> {
       _count: true,
     }),
     // zobowiązania przeterminowane — nieopłacone, zatwierdzalne koszty po terminie
-    // (jak lista „Do zapłaty" w Płatnościach); stan na dziś, poza filtrem okresu
+    // (jak lista „Do zapłaty" w Płatnościach); stan na dziś, poza filtrem okresu.
+    // Kategorie odłożone (isDeferred) to transfery na własne konta — nie są
+    // zobowiązaniem wobec dostawcy, więc poza tym KPI (spójnie z COST_WHERE).
     db.cost.aggregate({
-      where: { paid: false, needsConfirmation: false, dueDate: { lt: today } },
+      where: {
+        paid: false,
+        needsConfirmation: false,
+        category: { isDeferred: false },
+        dueDate: { lt: today },
+      },
       _sum: { grossGr: true },
       _count: true,
     }),

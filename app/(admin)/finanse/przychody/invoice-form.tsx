@@ -177,7 +177,7 @@ export function InvoiceFormDialog({
       notes: String(formData.get("notes") ?? ""),
       leadsQty: hasLeads ? leadsQty : "",
       leadUnitPrice: hasLeads ? leadUnitPrice : "",
-      status: invoice ? undefined : String(formData.get("status") ?? "ISSUED"),
+      status: String(formData.get("status") ?? "ISSUED"),
     };
     startTransition(async () => {
       const result = invoice
@@ -318,24 +318,22 @@ export function InvoiceFormDialog({
                 placeholder="np. FV/2026/07/01 lub puste = bez FV"
               />
             </div>
-            {!invoice && (
-              <div className="space-y-2">
-                <Label htmlFor="status">Status *</Label>
-                <Select name="status" defaultValue="ISSUED">
-                  <SelectTrigger id="status" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="NOT_ISSUED">Nie wystawiona</SelectItem>
-                    <SelectItem value="WAITING">Czekamy</SelectItem>
-                    <SelectItem value="ISSUED">Wysłana</SelectItem>
-                    <SelectItem value="NO_INVOICE">Bez faktury</SelectItem>
-                    <SelectItem value="PAID">Opłacona</SelectItem>
-                    <SelectItem value="DRAFT">Szkic (Bez FV)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="status">Status *</Label>
+              <Select name="status" defaultValue={invoice?.status ?? "ISSUED"}>
+                <SelectTrigger id="status" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NOT_ISSUED">Nie wystawiona</SelectItem>
+                  <SelectItem value="WAITING">Czekamy</SelectItem>
+                  <SelectItem value="ISSUED">Wysłana</SelectItem>
+                  <SelectItem value="NO_INVOICE">Bez faktury</SelectItem>
+                  <SelectItem value="PAID">Opłacona</SelectItem>
+                  <SelectItem value="DRAFT">Szkic (Bez FV)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* ── Oferta / tagi ─────────────────────────────────────── */}
