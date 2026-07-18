@@ -5,6 +5,8 @@ import { buildRwReport, type RwReport } from "@/lib/rw";
 import { loadPeopleRules } from "@/lib/rw-people";
 import { loadInternalRulesConfig } from "@/lib/rw-accounts";
 import { getBoaTargets } from "@/lib/settings";
+import { getLedgerReconciliation } from "@/lib/reports";
+import { LedgerReconciliation } from "./ledger-reconciliation";
 import type { BankAccount } from "@/lib/bank-parse";
 import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -37,7 +39,7 @@ export default async function RachunekWynikowPage({
   const requested = params.rok ? parseInt(params.rok, 10) : NaN;
   const year = years.includes(requested) ? requested : years[0];
 
-  const [entries, manual, batches, vatRuleRows, boaTargets] = await Promise.all([
+  const [entries, manual, batches, vatRuleRows, boaTargets, reconciliation] = await Promise.all([
     db.rwEntry.findMany({
       where: { year },
       select: { month: true, kind: true, category: true, amountGr: true },
@@ -54,6 +56,7 @@ export default async function RachunekWynikowPage({
       select: { matchKey: true, vatRate: true, category: true },
     }),
     getBoaTargets(),
+    getLedgerReconciliation(year),
   ]);
 
   // nauczone referencje per kontrahent (klucz → stawka VAT / kategoria) —
@@ -128,6 +131,9 @@ export default async function RachunekWynikowPage({
         categoryRules={categoryRules}
         aiEnabled={Boolean(process.env.ANTHROPIC_API_KEY)}
       />
+      <div className="mt-4">
+        <LedgerReconciliation year={year} rows={reconciliation.rows} />
+      </div>
     </>
   );
 }

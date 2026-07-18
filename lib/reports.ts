@@ -30,6 +30,7 @@ import {
   isAllocationEnabled,
 } from "./settings";
 import { computeVatFromNet } from "./calc";
+import { RW_CATEGORIES } from "./rw-types";
 import { isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
@@ -713,6 +714,96 @@ export async function getVerticalMonthlyProfit(
       marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
     };
   });
+}
+
+// ── Uzgodnienie rejestrów: RW (kasowo, z wyciągów) vs Przychody/Koszty ──
+
+// Kategorie RW odłożone/podatkowe (ODLOZONE + CIT) — transfery wewnętrzne i
+// podatki; wykluczane z „kosztu operacyjnego" RW, by porównanie z modułem
+// Koszty (który wyklucza isDeferred) było jabłka-do-jabłek.
+const RW_DEFERRED_CATEGORIES = new Set(
+  RW_CATEGORIES.filter((c) => c.bucket === "ODLOZONE" || c.bucket === "CIT").map(
+    (c) => c.name
+  )
+);
+
+export interface LedgerReconRow {
+  month: number; // 1–12
+  invoiceAccrualGr: number; // Σ faktur (netto, bez DRAFT) po dacie sprzedaży
+  invoiceCashGr: number; // Σ faktur opłaconych (netto) po dacie zapłaty
+  rwRevenueGr: number; // Σ RW PRZYCHODY (netto) w miesiącu wyciągu
+  costGr: number; // Σ Cost (netto, COST_WHERE) po dacie wystawienia
+  rwCostGr: number; // Σ RW koszty operacyjne (bez odłożonych/podatków), dodatnio
+}
+
+export interface LedgerReconciliation {
+  year: number;
+  rows: LedgerReconRow[];
+}
+
+/**
+ * Zestawienie miesięczne dwóch rejestrów za rok:
+ * - Przychód memoriałowy (faktury po saleDate) i kasowy (faktury opłacone po
+ *   paidDate) vs RW PRZYCHODY (miesiąc wpływu na konto z wyciągu).
+ * - Koszt (moduł Koszty, COST_WHERE, po docDate) vs RW koszty operacyjne.
+ * Delty liczy UI. Odpowiada na „przychód w adminOS nie zgadza się z arkuszami":
+ * lokalizuje miesiąc i stronę rozjazdu (kasowo vs memoriałowo, braki importów).
+ */
+export async function getLedgerReconciliation(
+  year: number
+): Promise<LedgerReconciliation> {
+  const from = new Date(Date.UTC(year, 0, 1));
+  const to = new Date(Date.UTC(year + 1, 0, 1));
+
+  const [accrualInvoices, cashInvoices, costs, rwEntries] = await Promise.all([
+    db.invoice.findMany({
+      where: { ...REVENUE_WHERE, saleDate: { gte: from, lt: to } },
+      select: { saleDate: true, netGr: true },
+    }),
+    db.invoice.findMany({
+      where: { status: "PAID", paidDate: { gte: from, lt: to } },
+      select: { paidDate: true, netGr: true },
+    }),
+    db.cost.findMany({
+      where: { ...COST_WHERE, docDate: { gte: from, lt: to } },
+      select: { docDate: true, netGr: true },
+    }),
+    db.rwEntry.findMany({
+      where: { year },
+      select: { month: true, kind: true, category: true, amountGr: true },
+    }),
+  ]);
+
+  const rows: LedgerReconRow[] = Array.from({ length: 12 }, (_, i) => ({
+    month: i + 1,
+    invoiceAccrualGr: 0,
+    invoiceCashGr: 0,
+    rwRevenueGr: 0,
+    costGr: 0,
+    rwCostGr: 0,
+  }));
+
+  for (const inv of accrualInvoices) {
+    rows[inv.saleDate.getUTCMonth()].invoiceAccrualGr += inv.netGr;
+  }
+  for (const inv of cashInvoices) {
+    if (inv.paidDate) rows[inv.paidDate.getUTCMonth()].invoiceCashGr += inv.netGr;
+  }
+  for (const c of costs) {
+    rows[c.docDate.getUTCMonth()].costGr += c.netGr;
+  }
+  for (const e of rwEntries) {
+    const idx = e.month - 1;
+    if (idx < 0 || idx > 11) continue;
+    if (e.kind === "PRZYCHOD") {
+      rows[idx].rwRevenueGr += e.amountGr;
+    } else if (!RW_DEFERRED_CATEGORIES.has(e.category)) {
+      // koszty RW są ujemne — do porównania z Cost.netGr (dodatnie) bierzemy wartość bezwzględną
+      rows[idx].rwCostGr += -e.amountGr;
+    }
+  }
+
+  return { year, rows };
 }
 
 // ── Koszty cykliczne — leniwe generowanie miesięcznych kopii ────────
