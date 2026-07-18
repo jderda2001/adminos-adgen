@@ -45,6 +45,7 @@ export interface DeliveryRow {
   costGr: number;
   cplGr: number | null;
   source: LeadCostSource;
+  estimated: boolean;
   note: string | null;
 }
 
@@ -59,12 +60,14 @@ export function DeliveriesCard({
   deliveries,
   brands,
   clients,
+  verticals,
   verticalsWithCampaign,
 }: {
   month: string;
   deliveries: DeliveryRow[];
   brands: BrandOption[];
   clients: ClientOption[];
+  verticals: string[];
   /** wertykale z kampanią (leady>0) w tym miesiącu — do ostrzeżenia „brak kampanii" */
   verticalsWithCampaign: string[];
 }) {
@@ -97,6 +100,7 @@ export function DeliveriesCard({
           month={month}
           brands={brands}
           clients={clients}
+          verticals={verticals}
           verticalsWithCampaign={verticalsWithCampaign}
           trigger={
             <Button size="sm">
@@ -128,7 +132,14 @@ export function DeliveriesCard({
           <TableBody>
             {deliveries.map((d) => (
               <TableRow key={d.id}>
-                <TableCell className="font-medium">{d.clientName}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="flex items-center gap-1.5">
+                    {d.clientName}
+                    {d.estimated && (
+                      <StatusBadge tone="amber">estymacja</StatusBadge>
+                    )}
+                  </span>
+                </TableCell>
                 <TableCell>{d.vertical}</TableCell>
                 <TableCell className="text-muted-foreground">
                   {d.brandName ?? "mix"}
@@ -151,6 +162,7 @@ export function DeliveriesCard({
                       month={month}
                       brands={brands}
                       clients={clients}
+                      verticals={verticals}
                       verticalsWithCampaign={verticalsWithCampaign}
                       delivery={{
                         id: d.id,

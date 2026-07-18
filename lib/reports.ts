@@ -32,7 +32,7 @@ import {
 import { computeVatFromNet } from "./calc";
 import { RW_CATEGORIES } from "./rw-types";
 import type { LeadForecastData } from "./lead-forecast";
-import { isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
+import { DEFAULT_VERTICALS, isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
   cplGr,
@@ -444,6 +444,7 @@ export interface LeadMonthData {
     costGr: number;
     cplGr: number | null;
     source: LeadCostSource;
+    estimated: boolean;
     note: string | null;
   }[];
   totals: {
@@ -533,6 +534,7 @@ export async function getLeadMonthData(month: string): Promise<LeadMonthData> {
       costGr: cost?.costGr ?? 0,
       cplGr: cost?.cplGr ?? null,
       source: (cost?.source ?? "BRAK_KAMPANII") as LeadCostSource,
+      estimated: d.estimated,
       note: d.note,
     };
   });
@@ -715,6 +717,103 @@ export async function getVerticalMonthlyProfit(
       marginFraction: revenueGr > 0 ? profitGr / revenueGr : null,
     };
   });
+}
+
+// ── Auto-przenoszenie dostaw leadów na kolejny miesiąc ──────────────
+
+/** Poprzedni miesiąc dla klucza "RRRR-MM". */
+function prevMonthKey(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return monthKey(new Date(Date.UTC(y, m - 2, 1)));
+}
+
+/**
+ * Dla klientów na paczkach leadów (PAKIETY_LEADOW, ACTIVE) z TRWAJĄCĄ umową
+ * (endDate null = na czas nieokreślony, lub endDate ≥ ten miesiąc = w okresie
+ * wypowiedzenia) auto-kopiuje dostawy z poprzedniego miesiąca do `targetPeriod`
+ * jako `estimated` (do potwierdzenia/korekty) — o ile klient nie ma jeszcze
+ * żadnej dostawy w tym miesiącu. Idempotentne. Wywoływane dla BIEŻĄCEGO miesiąca.
+ */
+export async function ensureCarriedLeadDeliveries(targetPeriod: string): Promise<void> {
+  const prev = prevMonthKey(targetPeriod);
+  const [prevDeliveries, currentClientIds, leadClients] = await Promise.all([
+    db.leadDelivery.findMany({
+      where: { period: prev },
+      select: { clientId: true, vertical: true, brandId: true, leadsCount: true },
+    }),
+    db.leadDelivery.findMany({
+      where: { period: targetPeriod },
+      select: { clientId: true },
+      distinct: ["clientId"],
+    }),
+    db.client.findMany({
+      where: { status: "ACTIVE", billingModel: "PAKIETY_LEADOW" },
+      select: { id: true, endDate: true },
+    }),
+  ]);
+  if (prevDeliveries.length === 0) return;
+
+  const hasCurrent = new Set(currentClientIds.map((c) => c.clientId));
+  // klient z trwającą umową w targetPeriod (endDate null lub obejmuje miesiąc)
+  const contractCovers = new Map(
+    leadClients.map((c) => [
+      c.id,
+      c.endDate === null || monthKey(c.endDate) >= targetPeriod,
+    ])
+  );
+
+  const toCreate = prevDeliveries.filter(
+    (d) => contractCovers.get(d.clientId) === true && !hasCurrent.has(d.clientId)
+  );
+  if (toCreate.length === 0) return;
+
+  await db.leadDelivery.createMany({
+    data: toCreate.map((d) => ({
+      period: targetPeriod,
+      clientId: d.clientId,
+      vertical: d.vertical,
+      brandId: d.brandId,
+      leadsCount: d.leadsCount,
+      estimated: true,
+    })),
+  });
+}
+
+// ── Wertykały leadowe (edytowalne) ──────────────────────────────────
+
+/** Nazwy aktywnych wertykali (po pozycji). Fallback do DEFAULT_VERTICALS, gdy tabela pusta. */
+export async function getActiveVerticalNames(): Promise<string[]> {
+  const rows = await db.leadVertical.findMany({
+    where: { active: true },
+    orderBy: { position: "asc" },
+    select: { name: true },
+  });
+  return rows.length > 0 ? rows.map((r) => r.name) : [...DEFAULT_VERTICALS];
+}
+
+export interface VerticalManageRow {
+  id: string;
+  name: string;
+  active: boolean;
+  usageCount: number; // kampanie + dostawy (po nazwie wertykalu)
+}
+
+/** Wertykały do zarządzania (dialog „Wertykały") — z licznikiem użycia. */
+export async function getVerticalsForManagement(): Promise<VerticalManageRow[]> {
+  const [verticals, campByV, delByV] = await Promise.all([
+    db.leadVertical.findMany({ orderBy: { position: "asc" } }),
+    db.leadCampaignMonth.groupBy({ by: ["vertical"], _count: { _all: true } }),
+    db.leadDelivery.groupBy({ by: ["vertical"], _count: { _all: true } }),
+  ]);
+  const usage = new Map<string, number>();
+  for (const c of campByV) usage.set(c.vertical, (usage.get(c.vertical) ?? 0) + c._count._all);
+  for (const d of delByV) usage.set(d.vertical, (usage.get(d.vertical) ?? 0) + d._count._all);
+  return verticals.map((v) => ({
+    id: v.id,
+    name: v.name,
+    active: v.active,
+    usageCount: usage.get(v.name) ?? 0,
+  }));
 }
 
 // ── Dane wejściowe do prognozy leadów (moduł Estymacje) ─────────────

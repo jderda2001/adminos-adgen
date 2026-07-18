@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/select";
 import {
   DEFAULT_OFFER_TAGS,
-  LEAD_CATEGORIES,
   LEAD_TAG_PREFIX,
   LEADS_OFFER_TAG,
   VAT_RATES,
@@ -59,10 +58,12 @@ function parseTags(raw: string | null | undefined): string[] {
 export function InvoiceFormDialog({
   invoice,
   clients,
+  leadVerticals,
   trigger,
 }: {
   invoice?: InvoiceRow;
   clients: ClientOption[];
+  leadVerticals: string[];
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -430,7 +431,10 @@ export function InvoiceFormDialog({
                       <SelectValue placeholder="Wybierz kategorię leadów" />
                     </SelectTrigger>
                     <SelectContent>
-                      {LEAD_CATEGORIES.map((c) => (
+                      {(leadCategory && !leadVerticals.includes(leadCategory)
+                        ? [leadCategory, ...leadVerticals]
+                        : leadVerticals
+                      ).map((c) => (
                         <SelectItem key={c} value={c}>
                           {c}
                         </SelectItem>

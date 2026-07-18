@@ -24,7 +24,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LEAD_CATEGORIES } from "@/lib/types";
 import { formatAmount, formatMonth } from "@/lib/format";
 import { saveCampaignAction } from "./actions";
 
@@ -46,11 +45,13 @@ export interface CampaignFormData {
 export function CampaignDialog({
   month,
   brands,
+  verticals,
   campaign,
   trigger,
 }: {
   month: string;
   brands: BrandOption[];
+  verticals: string[];
   /** undefined = nowa kampania */
   campaign?: CampaignFormData;
   trigger: ReactNode;
@@ -65,6 +66,11 @@ export function CampaignDialog({
 
   // marki do wyboru: aktywne + bieżąca (edycja kampanii nieaktywnej marki)
   const options = brands.filter((b) => b.active || b.id === campaign?.brandId);
+  // wertykały: aktywne + bieżący (gdy edytujemy wpis z nieaktywnym/starym wertykałem)
+  const verticalOptions =
+    campaign && !verticals.includes(campaign.vertical)
+      ? [campaign.vertical, ...verticals]
+      : verticals;
 
   function handleOpenChange(next: boolean) {
     if (pending) return;
@@ -135,7 +141,7 @@ export function CampaignDialog({
                   <SelectValue placeholder="Wybierz" />
                 </SelectTrigger>
                 <SelectContent>
-                  {LEAD_CATEGORIES.map((c) => (
+                  {verticalOptions.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

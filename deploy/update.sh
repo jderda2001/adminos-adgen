@@ -17,9 +17,10 @@ npm ci
 echo "▸ prisma db push (synchronizacja schematu; nie usuwa danych)"
 npx prisma db push
 
-echo "▸ dogranie kategorii kosztów i marek (idempotentne upserty)"
+echo "▸ dogranie kategorii kosztów, marek i wertykali (idempotentne upserty)"
 npx tsx prisma/ensure-cost-categories.ts
 npx tsx prisma/ensure-brands.ts
+npx tsx prisma/ensure-verticals.ts
 
 echo "▸ next build"
 npm run build

@@ -12,7 +12,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { parseMoneyToGr, pluralPl } from "@/lib/format";
-import { LEAD_CATEGORIES } from "@/lib/types";
+import { DEFAULT_VERTICALS } from "@/lib/types";
 
 const PATHS = ["/leady", "/rentownosc", "/dashboard"] as const;
 function revalidateAll() {
@@ -27,9 +27,16 @@ const periodSchema = z
     return m >= 1 && m <= 12;
   }, "Nieprawidłowy miesiąc");
 
-const verticalSchema = z.enum(LEAD_CATEGORIES, {
-  message: "Wybierz wertykal z listy",
-});
+// Wertykał jest teraz edytowalny (LeadVertical) — walidujemy jako niepusty string,
+// a istnienie sprawdzamy runtime (DB lub lista domyślna) w akcjach zapisu.
+const verticalSchema = z.string().trim().min(1, "Wybierz wertykal");
+
+/** Wertykał znany = istnieje w LeadVertical lub w wartościach domyślnych. */
+async function isKnownVertical(name: string): Promise<boolean> {
+  if (DEFAULT_VERTICALS.includes(name)) return true;
+  const v = await db.leadVertical.findUnique({ where: { name } });
+  return v !== null;
+}
 
 // ── Kampanie (marka × wertykal × miesiąc) ────────────────────────────
 
@@ -69,6 +76,7 @@ export async function saveCampaignAction(input: {
   }
   const brand = await db.brand.findUnique({ where: { id: d.brandId } });
   if (!brand) return fail("Wybrana marka nie istnieje");
+  if (!(await isKnownVertical(d.vertical))) return fail("Nieznany wertykal");
 
   const data = {
     period: d.period,
@@ -139,6 +147,7 @@ export async function saveDeliveryAction(input: {
   }
   const client = await db.client.findUnique({ where: { id: d.clientId } });
   if (!client) return fail("Wybrany klient nie istnieje");
+  if (!(await isKnownVertical(d.vertical))) return fail("Nieznany wertykal");
   const brandId = d.brandId || null;
   if (brandId) {
     const brand = await db.brand.findUnique({ where: { id: brandId } });
@@ -152,6 +161,7 @@ export async function saveDeliveryAction(input: {
     brandId,
     leadsCount,
     note: d.note || null,
+    estimated: false, // ręczny zapis = potwierdzenie (zdejmuje znacznik estymacji)
   };
 
   if (d.id) {
@@ -227,4 +237,73 @@ export async function deleteBrandAction(id: string): Promise<ActionResult> {
   await db.brand.delete({ where: { id } });
   revalidateAll();
   return ok("Marka usunięta");
+}
+
+// ── Wertykały (nisze leadowe) ────────────────────────────────────────
+
+const verticalNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Podaj nazwę wertykalu")
+  .max(80, "Nazwa może mieć maks. 80 znaków");
+
+const VERTICAL_PATHS = ["/leady", "/rentownosc", "/dashboard", "/finanse/przychody", "/estymacje"] as const;
+function revalidateVerticals() {
+  for (const p of VERTICAL_PATHS) revalidatePath(p);
+}
+
+export async function createVerticalAction(name: string): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = verticalNameSchema.safeParse(name);
+  if (!parsed.success) return fail(parsed.error.issues[0].message);
+  const exists = await db.leadVertical.findUnique({ where: { name: parsed.data } });
+  if (exists) return fail("Wertykal o tej nazwie już istnieje");
+  const maxPos = (await db.leadVertical.aggregate({ _max: { position: true } }))._max.position ?? 0;
+  await db.leadVertical.create({ data: { name: parsed.data, position: maxPos + 1 } });
+  revalidateVerticals();
+  return ok("Wertykal dodany");
+}
+
+export async function renameVerticalAction(id: string, name: string): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = verticalNameSchema.safeParse(name);
+  if (!parsed.success) return fail(parsed.error.issues[0].message);
+  const current = await db.leadVertical.findUnique({ where: { id } });
+  if (!current) return fail("Wertykal nie istnieje");
+  const clash = await db.leadVertical.findUnique({ where: { name: parsed.data } });
+  if (clash && clash.id !== id) return fail("Wertykal o tej nazwie już istnieje");
+  // przepisz nazwę na istniejących kampaniach/dostawach (wertykal to string)
+  await db.$transaction([
+    db.leadVertical.update({ where: { id }, data: { name: parsed.data } }),
+    db.leadCampaignMonth.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } }),
+    db.leadDelivery.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } }),
+  ]);
+  revalidateVerticals();
+  return ok("Nazwa wertykalu zapisana (zaktualizowano kampanie i dostawy)");
+}
+
+export async function toggleVerticalActiveAction(id: string, active: boolean): Promise<ActionResult> {
+  await requireAdmin();
+  await db.leadVertical.update({ where: { id }, data: { active } });
+  revalidateVerticals();
+  return ok(active ? "Wertykal aktywny" : "Wertykal ukryty z nowych wpisów");
+}
+
+export async function deleteVerticalAction(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const v = await db.leadVertical.findUnique({ where: { id } });
+  if (!v) return fail("Wertykal nie istnieje");
+  const [campaigns, deliveries] = await Promise.all([
+    db.leadCampaignMonth.count({ where: { vertical: v.name } }),
+    db.leadDelivery.count({ where: { vertical: v.name } }),
+  ]);
+  const usage = campaigns + deliveries;
+  if (usage > 0) {
+    return fail(
+      `Nie można usunąć — wertykal ma ${usage} ${pluralPl(usage, "wpis", "wpisy", "wpisów")} (kampanie/dostawy). Wyłącz go zamiast usuwać.`
+    );
+  }
+  await db.leadVertical.delete({ where: { id } });
+  revalidateVerticals();
+  return ok("Wertykal usunięty");
 }

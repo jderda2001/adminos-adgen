@@ -197,4 +197,8 @@ export const LEAD_CATEGORIES = [
   "Automotive",
 ] as const;
 
+// Startowe wertykały (seed do LeadVertical). Po wdrożeniu lista jest edytowalna
+// w module Leady; LEAD_CATEGORIES to tylko wartości domyślne/fallback.
+export const DEFAULT_VERTICALS: readonly string[] = LEAD_CATEGORIES;
+
 export const LEAD_TAG_PREFIX = "Leady: ";

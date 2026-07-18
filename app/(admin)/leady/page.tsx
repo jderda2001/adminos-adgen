@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import { Settings2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { getLeadMonthData } from "@/lib/reports";
+import {
+  getLeadMonthData,
+  getActiveVerticalNames,
+  getVerticalsForManagement,
+  ensureCarriedLeadDeliveries,
+} from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
 import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -14,6 +19,7 @@ import { CampaignsCard } from "./campaigns-card";
 import { DeliveriesCard } from "./deliveries-card";
 import { ReconciliationCard } from "./reconciliation-card";
 import { BrandsDialog, type BrandRow } from "./brands-dialog";
+import { VerticalsDialog } from "./verticals-dialog";
 import type { BrandOption } from "./campaign-dialog";
 import type { ClientOption } from "./delivery-dialog";
 
@@ -35,18 +41,27 @@ export default async function LeadyPage({
       ? requested
       : monthKey(todayUTC());
 
-  const [data, brandRows, clientRows] = await Promise.all([
-    getLeadMonthData(month),
-    db.brand.findMany({
-      orderBy: { position: "asc" },
-      include: { _count: { select: { campaigns: true, deliveries: true } } },
-    }),
-    db.client.findMany({
-      where: { status: "ACTIVE" },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, billingModel: true },
-    }),
-  ]);
+  // auto-przeniesienie dostaw z poprzedniego miesiąca — tylko dla BIEŻĄCEGO
+  // miesiąca (nie backfillujemy historii przy przeglądaniu wstecz)
+  if (month === monthKey(todayUTC())) {
+    await ensureCarriedLeadDeliveries(month);
+  }
+
+  const [data, brandRows, clientRows, activeVerticals, verticalRowsForDialog] =
+    await Promise.all([
+      getLeadMonthData(month),
+      db.brand.findMany({
+        orderBy: { position: "asc" },
+        include: { _count: { select: { campaigns: true, deliveries: true } } },
+      }),
+      db.client.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        select: { id: true, name: true, billingModel: true },
+      }),
+      getActiveVerticalNames(),
+      getVerticalsForManagement(),
+    ]);
 
   const brands: BrandOption[] = brandRows.map((b) => ({
     id: b.id,
@@ -73,6 +88,8 @@ export default async function LeadyPage({
   ];
   // dostawy, które nie mają z czego policzyć CPL (koszt 0) — do zbiorczego alertu
   const unpricedDeliveries = data.deliveries.filter((d) => d.source === "BRAK_KAMPANII");
+  // dostawy auto-przeniesione z poprzedniego miesiąca (do potwierdzenia/korekty)
+  const estimatedCount = data.deliveries.filter((d) => d.estimated).length;
 
   return (
     <>
@@ -81,6 +98,14 @@ export default async function LeadyPage({
         description="Kampanie marek wewnętrznych i dostawy leadów do klientów — CPL i koszt leadów per klient"
       >
         <MonthNav month={month} />
+        <VerticalsDialog
+          verticals={verticalRowsForDialog}
+          trigger={
+            <Button variant="outline" size="sm">
+              <Settings2 data-icon="inline-start" /> Wertykały
+            </Button>
+          }
+        />
         <BrandsDialog
           brands={brandsForDialog}
           trigger={
@@ -121,6 +146,16 @@ export default async function LeadyPage({
           />
         </div>
 
+        {estimatedCount > 0 && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            {estimatedCount}{" "}
+            {estimatedCount === 1
+              ? "dostawa została przeniesiona automatycznie z poprzedniego miesiąca"
+              : "dostaw zostało przeniesionych automatycznie z poprzedniego miesiąca"}{" "}
+            (oznaczone „estymacja") — sprawdź liczby i zapisz, aby potwierdzić.
+          </div>
+        )}
+
         {unpricedDeliveries.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             {unpricedDeliveries.length}{" "}
@@ -135,12 +170,18 @@ export default async function LeadyPage({
           </div>
         )}
 
-        <CampaignsCard month={month} campaigns={data.campaigns} brands={brands} />
+        <CampaignsCard
+          month={month}
+          campaigns={data.campaigns}
+          brands={brands}
+          verticals={activeVerticals}
+        />
         <DeliveriesCard
           month={month}
           deliveries={data.deliveries}
           brands={brands}
           clients={clients}
+          verticals={activeVerticals}
           verticalsWithCampaign={verticalsWithCampaign}
         />
         <ReconciliationCard

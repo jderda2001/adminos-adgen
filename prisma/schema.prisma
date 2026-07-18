@@ -298,6 +298,17 @@ model Brand {
   deliveries LeadDelivery[]
 }
 
+// Wertykał leadowy (nisza: SKD, OZE, Kredyty…). Edytowalny w module Leady;
+// startowe wartości z DEFAULT_VERTICALS (lib/types.ts). Kampanie/dostawy trzymają
+// nazwę wertykalu jako String (spójny z name) — brak twardego FK dla prostoty.
+model LeadVertical {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  active    Boolean  @default(true)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
 // Miesięczny wynik kampanii marka × wertykal — spend i liczba leadów
 // z Meta Ads Manager. Kwoty NETTO w groszach. CPL = spendGr / leadsCount.
 model LeadCampaignMonth {
@@ -328,6 +339,7 @@ model LeadDelivery {
   brand      Brand?   @relation(fields: [brandId], references: [id], onDelete: Restrict)
   leadsCount Int
   note       String?
+  estimated  Boolean  @default(false) // auto-przeniesione z poprzedniego miesiąca (do potwierdzenia/korekty)
   createdAt  DateTime @default(now())
 
   @@index([period])

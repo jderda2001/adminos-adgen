@@ -47,10 +47,12 @@ export function CampaignsCard({
   month,
   campaigns,
   brands,
+  verticals,
 }: {
   month: string;
   campaigns: CampaignRow[];
   brands: BrandOption[];
+  verticals: string[];
 }) {
   const [toDelete, setToDelete] = useState<CampaignRow | null>(null);
   const [pending, startTransition] = useTransition();
@@ -81,6 +83,7 @@ export function CampaignsCard({
         <CampaignDialog
           month={month}
           brands={brands}
+          verticals={verticals}
           trigger={
             <Button size="sm">
               <Plus className="size-4" /> Dodaj kampanię
@@ -130,6 +133,7 @@ export function CampaignsCard({
                     <CampaignDialog
                       month={month}
                       brands={brands}
+          verticals={verticals}
                       campaign={{
                         id: c.id,
                         brandId: c.brandId,

@@ -27,7 +27,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { LEAD_CATEGORIES } from "@/lib/types";
 import { formatMonth } from "@/lib/format";
 import { saveDeliveryAction } from "./actions";
 import type { BrandOption } from "./campaign-dialog";
@@ -53,6 +52,7 @@ export function DeliveryDialog({
   month,
   brands,
   clients,
+  verticals,
   verticalsWithCampaign,
   delivery,
   trigger,
@@ -60,6 +60,7 @@ export function DeliveryDialog({
   month: string;
   brands: BrandOption[];
   clients: ClientOption[];
+  verticals: string[];
   verticalsWithCampaign: string[];
   /** undefined = nowa dostawa */
   delivery?: DeliveryFormData;
@@ -76,6 +77,10 @@ export function DeliveryDialog({
   const leadClients = clients.filter((c) => c.isLeadClient);
   const otherClients = clients.filter((c) => !c.isLeadClient);
   const brandOptions = brands.filter((b) => b.active || b.id === delivery?.brandId);
+  const verticalOptions =
+    delivery && !verticals.includes(delivery.vertical)
+      ? [delivery.vertical, ...verticals]
+      : verticals;
 
   function handleOpenChange(next: boolean) {
     if (pending) return;
@@ -162,7 +167,7 @@ export function DeliveryDialog({
                   <SelectValue placeholder="Wybierz" />
                 </SelectTrigger>
                 <SelectContent>
-                  {LEAD_CATEGORIES.map((c) => (
+                  {verticalOptions.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>

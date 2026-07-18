@@ -161,10 +161,12 @@ export function InvoicesTable({
   invoices,
   clients,
   kpis,
+  leadVerticals,
 }: {
   invoices: InvoiceRow[];
   clients: ClientOption[];
   kpis: RevenueKpis;
+  leadVerticals: string[];
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -334,7 +336,7 @@ export function InvoicesTable({
             <Download className="size-4" /> Eksport CSV
           </a>
         </Button>
-        <InvoiceFormDialog clients={clients} trigger={newInvoiceTrigger} />
+        <InvoiceFormDialog clients={clients} leadVerticals={leadVerticals} trigger={newInvoiceTrigger} />
       </PageHeader>
 
       {/* ── KPI miesiąca ───────────────────────────────────────── */}
@@ -423,6 +425,7 @@ export function InvoicesTable({
           >
             <InvoiceFormDialog
               clients={clients}
+              leadVerticals={leadVerticals}
               trigger={
                 <Button size="sm">
                   <Plus className="size-4" /> Nowy przychód
@@ -445,6 +448,7 @@ export function InvoicesTable({
               <InvoiceFormDialog
                 invoice={detail}
                 clients={clients}
+                leadVerticals={leadVerticals}
                 trigger={
                   <Button variant="outline" size="sm">
                     <Pencil className="size-4" /> Edytuj

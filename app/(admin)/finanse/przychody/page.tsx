@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { refreshInvoiceStatuses } from "@/lib/reports";
+import { refreshInvoiceStatuses, getActiveVerticalNames } from "@/lib/reports";
 import { resolvePeriod } from "@/lib/periods";
 import { INVOICE_STATUSES, VAT_RATES, VAT_RATE_FRACTIONS } from "@/lib/types";
 import {
@@ -61,7 +61,7 @@ export default async function RevenuesPage({
     ? statusRaw
     : "";
 
-  const [invoices, clients] = await Promise.all([
+  const [invoices, clients, leadVerticals] = await Promise.all([
     db.invoice.findMany({
       where: {
         saleDate: { gte: period.from, lt: period.to },
@@ -75,6 +75,7 @@ export default async function RevenuesPage({
       orderBy: { name: "asc" },
       select: { id: true, name: true },
     }),
+    getActiveVerticalNames(),
   ]);
 
   const rows: InvoiceRow[] = invoices.map((inv) => ({
@@ -116,5 +117,7 @@ export default async function RevenuesPage({
     { netGr: 0, grossGr: 0, issuedNetGr: 0, paidNetGr: 0, count: 0 }
   );
 
-  return <InvoicesTable invoices={rows} clients={clients} kpis={kpis} />;
+  return (
+    <InvoicesTable invoices={rows} clients={clients} kpis={kpis} leadVerticals={leadVerticals} />
+  );
 }
