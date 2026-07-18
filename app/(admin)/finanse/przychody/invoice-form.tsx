@@ -72,6 +72,9 @@ export function InvoiceFormDialog({
   const [vatRate, setVatRate] = useState<VatRate>("23");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  // Paczki leadów: liczba leadów × cena jednostkowa (netto) → kwota netto
+  const [leadsQty, setLeadsQty] = useState("");
+  const [leadUnitPrice, setLeadUnitPrice] = useState("");
 
   const today = todayUTC();
   const defaultSaleDate = invoice
@@ -86,6 +89,10 @@ export function InvoiceFormDialog({
     setVatRate(invoice && isVatRate(invoice.vatRate) ? invoice.vatRate : "23");
     setTags(parseTags(invoice?.offerTags));
     setTagInput("");
+    setLeadsQty(invoice?.leadsQty != null ? String(invoice.leadsQty) : "");
+    setLeadUnitPrice(
+      invoice?.leadUnitPriceGr != null ? formatAmount(invoice.leadUnitPriceGr) : ""
+    );
   }
 
   function handleOpenChange(next: boolean) {
@@ -129,8 +136,24 @@ export function InvoiceFormDialog({
     ]);
   }
 
+  // Paczki leadów: netto liczone jako liczba leadów × cena jednostkowa (netto).
+  const qtyInt = leadsQty.trim() === "" ? null : Number(leadsQty.replace(/\s/g, ""));
+  const unitPriceGr = leadUnitPrice.trim() === "" ? null : parseMoneyToGr(leadUnitPrice);
+  const leadsNetGr =
+    hasLeads &&
+    qtyInt !== null &&
+    Number.isInteger(qtyInt) &&
+    qtyInt >= 1 &&
+    unitPriceGr !== null &&
+    unitPriceGr >= 0
+      ? qtyInt * unitPriceGr
+      : null;
+  // W trybie leadów (oba pola wypełnione) netto jest wyliczone i tylko do odczytu
+  const leadsMode = hasLeads && leadsNetGr !== null;
+  const effectiveNet = leadsMode ? formatAmount(leadsNetGr!) : net;
+
   // Podgląd VAT/brutto na żywo (serwer liczy ostatecznie przez computeVatFromNet)
-  const netGr = parseMoneyToGr(net);
+  const netGr = parseMoneyToGr(effectiveNet);
   const preview =
     netGr !== null && netGr >= 0
       ? (() => {
@@ -146,12 +169,14 @@ export function InvoiceFormDialog({
       number: String(formData.get("number") ?? ""),
       clientId: String(formData.get("clientId") ?? ""),
       label: String(formData.get("label") ?? ""),
-      net,
+      net: effectiveNet,
       vatRate,
       saleDate: String(formData.get("saleDate") ?? ""),
       dueDate: String(formData.get("dueDate") ?? ""),
       offerTags: tags.join(","),
       notes: String(formData.get("notes") ?? ""),
+      leadsQty: hasLeads ? leadsQty : "",
+      leadUnitPrice: hasLeads ? leadUnitPrice : "",
       status: invoice ? undefined : String(formData.get("status") ?? "ISSUED"),
     };
     startTransition(async () => {
@@ -210,10 +235,18 @@ export function InvoiceFormDialog({
               <Input
                 id="net"
                 inputMode="decimal"
-                value={net}
+                value={leadsMode ? formatAmount(leadsNetGr!) : net}
                 onChange={(e) => setNet(e.target.value)}
                 placeholder="12 000,00"
+                readOnly={leadsMode}
+                aria-readonly={leadsMode}
+                className={leadsMode ? "bg-muted text-muted-foreground" : undefined}
               />
+              {leadsMode && (
+                <p className="text-xs text-muted-foreground">
+                  Wyliczone z paczki leadów
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="vatRate">Stawka VAT *</Label>
@@ -366,22 +399,47 @@ export function InvoiceFormDialog({
               ))}
             </div>
 
-            {/* „Leady na" — widoczne tylko gdy wybrany tag PAKIETY LEADÓW */}
+            {/* Paczki leadów — pola widoczne tylko gdy wybrany tag PAKIETY LEADÓW.
+                Liczba leadów × cena jednostkowa wyliczają kwotę netto faktury. */}
             {hasLeads && (
-              <div className="space-y-1.5 rounded-md border bg-muted/30 p-2.5">
-                <Label htmlFor="leadCategory">Leady na</Label>
-                <Select value={leadCategory} onValueChange={setLeadCategory}>
-                  <SelectTrigger id="leadCategory" className="w-full">
-                    <SelectValue placeholder="Wybierz kategorię leadów" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {LEAD_CATEGORIES.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-2.5 rounded-md border bg-muted/30 p-2.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="leadsQty">Liczba leadów</Label>
+                    <Input
+                      id="leadsQty"
+                      inputMode="numeric"
+                      value={leadsQty}
+                      onChange={(e) => setLeadsQty(e.target.value)}
+                      placeholder="400"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="leadUnitPrice">Cena za lead (netto, zł)</Label>
+                    <Input
+                      id="leadUnitPrice"
+                      inputMode="decimal"
+                      value={leadUnitPrice}
+                      onChange={(e) => setLeadUnitPrice(e.target.value)}
+                      placeholder="50,00"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="leadCategory">Leady na</Label>
+                  <Select value={leadCategory} onValueChange={setLeadCategory}>
+                    <SelectTrigger id="leadCategory" className="w-full">
+                      <SelectValue placeholder="Wybierz kategorię leadów" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LEAD_CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             )}
           </div>

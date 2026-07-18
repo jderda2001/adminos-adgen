@@ -101,6 +101,10 @@ model Invoice {
   netGr     Int       @default(0) // kwota netto (zdenormalizowana; suma pozycji jeśli istnieją)
   vatGr     Int       @default(0)
   grossGr   Int       @default(0)
+  // Paczki leadów (oferta PAKIETY LEADÓW): netto = leadsQty × leadUnitPriceGr.
+  // null gdy przychód nie jest paczką leadów (kwota wpisana wprost).
+  leadsQty       Int? // liczba sprzedanych leadów na fakturze
+  leadUnitPriceGr Int? // cena jednostkowa leada NETTO w groszach
   notes     String?
   createdAt DateTime  @default(now())
 

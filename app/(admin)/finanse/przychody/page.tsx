@@ -94,6 +94,8 @@ export default async function RevenuesPage({
     vatRate: inferVatRate(inv.netGr, inv.vatGr),
     offerTags: inv.offerTags,
     notes: inv.notes,
+    leadsQty: inv.leadsQty,
+    leadUnitPriceGr: inv.leadUnitPriceGr,
   }));
 
   // KPI miesiąca — na kwotach netto (agregat finansowy liczony netto).

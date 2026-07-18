@@ -7,7 +7,7 @@ import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { dateFromInput, parseMoneyToGr } from "@/lib/format";
 import { computeVatFromNet } from "@/lib/calc";
-import { VAT_RATES, type VatRate } from "@/lib/types";
+import { LEADS_OFFER_TAG, VAT_RATES, type VatRate } from "@/lib/types";
 
 // ── Wejście formularza (rejestr przychodów — jedna kwota, bez pozycji) ──
 // Program zastępuje arkusz przychodów: wpisujemy pojedynczą kwotę netto,
@@ -23,6 +23,9 @@ export interface InvoiceFormInput {
   dueDate: string; // termin płatności
   offerTags: string; // tagi po przecinku
   notes: string;
+  /** paczki leadów (PAKIETY LEADÓW): liczba leadów × cena — wyliczają netto */
+  leadsQty?: string;
+  leadUnitPrice?: string; // cena za lead NETTO w zł
   /** tylko przy tworzeniu: DRAFT | ISSUED | PAID */
   status?: string;
 }
@@ -31,12 +34,14 @@ const invoiceSchema = z.object({
   number: z.string().trim().optional().default(""),
   clientId: z.string().trim().min(1, "Wybierz klienta"),
   label: z.string().trim().optional().default(""),
-  net: z.string().trim().min(1, "Podaj kwotę netto"),
+  net: z.string().trim().optional().default(""),
   vatRate: z.enum(VAT_RATES, { message: "Wybierz stawkę VAT" }),
   saleDate: z.string().trim().min(1, "Podaj datę przychodu"),
   dueDate: z.string().trim().min(1, "Podaj termin płatności"),
   offerTags: z.string().optional().default(""),
   notes: z.string().optional().default(""),
+  leadsQty: z.string().trim().optional().default(""),
+  leadUnitPrice: z.string().trim().optional().default(""),
   status: z
     .enum(["DRAFT", "NOT_ISSUED", "WAITING", "ISSUED", "NO_INVOICE", "PAID"], {
       message: "Wybierz status",
@@ -56,6 +61,8 @@ interface ParsedInvoice {
   dueDate: Date;
   offerTags: string | null;
   notes: string | null;
+  leadsQty: number | null;
+  leadUnitPriceGr: number | null;
   status?: "DRAFT" | "NOT_ISSUED" | "WAITING" | "ISSUED" | "NO_INVOICE" | "PAID";
 }
 
@@ -80,8 +87,36 @@ function parseInvoiceInput(
     };
   }
   const d = parsed.data;
+  const offerTags = normalizeTags(d.offerTags);
 
-  const netGr = parseMoneyToGr(d.net);
+  // Paczki leadów: gdy oferta zawiera „PAKIETY LEADÓW" i podano oba pola,
+  // netto = liczba leadów × cena jednostkowa (netto). Bez pól — netto wprost
+  // (kwota z pola), co obsługuje też stare faktury bez rozbicia.
+  const isLeads = offerTags
+    .split(",")
+    .some((t) => t.trim().toLowerCase() === LEADS_OFFER_TAG.toLowerCase());
+  let leadsQty: number | null = null;
+  let leadUnitPriceGr: number | null = null;
+  let netGr: number | null = null;
+
+  const qtyRaw = (d.leadsQty ?? "").trim();
+  const priceRaw = (d.leadUnitPrice ?? "").trim();
+  if (isLeads && qtyRaw !== "" && priceRaw !== "") {
+    const qty = Number(qtyRaw.replace(/\s/g, ""));
+    if (!Number.isInteger(qty) || qty < 1) {
+      return { success: false, error: "Liczba leadów musi być liczbą całkowitą (min. 1)" };
+    }
+    const priceGr = parseMoneyToGr(priceRaw);
+    if (priceGr === null || priceGr < 0) {
+      return { success: false, error: "Podaj poprawną cenę za lead, np. 50,00" };
+    }
+    leadsQty = qty;
+    leadUnitPriceGr = priceGr;
+    netGr = qty * priceGr;
+  } else {
+    netGr = parseMoneyToGr(d.net);
+  }
+
   if (netGr === null || netGr < 0) {
     return { success: false, error: "Podaj poprawną kwotę netto, np. 12 000,00" };
   }
@@ -99,7 +134,6 @@ function parseInvoiceInput(
   const amounts = computeVatFromNet(netGr, d.vatRate);
   const number = d.number.trim();
   const label = d.label.trim();
-  const offerTags = normalizeTags(d.offerTags);
   const notes = d.notes.trim();
 
   return {
@@ -116,6 +150,8 @@ function parseInvoiceInput(
       dueDate,
       offerTags: offerTags || null,
       notes: notes || null,
+      leadsQty,
+      leadUnitPriceGr,
       status: d.status,
     },
   };
@@ -156,6 +192,8 @@ export async function createInvoiceAction(
       netGr: d.netGr,
       vatGr: d.vatGr,
       grossGr: d.grossGr,
+      leadsQty: d.leadsQty,
+      leadUnitPriceGr: d.leadUnitPriceGr,
       offerTags: d.offerTags,
       notes: d.notes,
     },
@@ -202,6 +240,8 @@ export async function updateInvoiceAction(
         netGr: d.netGr,
         vatGr: d.vatGr,
         grossGr: d.grossGr,
+        leadsQty: d.leadsQty,
+        leadUnitPriceGr: d.leadUnitPriceGr,
         offerTags: d.offerTags,
         notes: d.notes,
       },

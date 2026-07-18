@@ -88,6 +88,8 @@ export interface InvoiceRow {
   vatRate: string;
   offerTags: string | null;
   notes: string | null;
+  leadsQty: number | null;
+  leadUnitPriceGr: number | null;
 }
 
 export interface ClientOption {
