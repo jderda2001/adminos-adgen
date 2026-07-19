@@ -85,6 +85,7 @@ export async function saveCampaignAction(input: {
     spendGr,
     leadsCount,
     note: d.note || null,
+    source: "MANUAL", // ręczny zapis = źródło ręczne (sync z Mety go nie nadpisze)
   };
 
   try {

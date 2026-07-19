@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
+import { isMetaConfigured } from "@/lib/meta-ads";
 import { PageHeader } from "@/components/page-header";
 import { ProfitabilityCard } from "./profitability-card";
 import { BoaCard } from "./boa-card";
 import { CompanyCard } from "./company-card";
 import { CategoriesCard, type CategoryRow } from "./categories-card";
+import { IntegrationsCard } from "./integrations-card";
 
 export const metadata: Metadata = { title: "Ustawienia" };
 
@@ -54,6 +56,10 @@ export default async function SettingsPage() {
           name={settings.company_name}
           address={settings.company_address}
           account={settings.company_account}
+        />
+        <IntegrationsCard
+          metaAutosyncEnabled={settings.meta_autosync_enabled === "1"}
+          metaConfigured={isMetaConfigured()}
         />
         <CategoriesCard categories={categoryRows} />
       </div>

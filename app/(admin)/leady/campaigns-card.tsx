@@ -40,6 +40,7 @@ export interface CampaignRow {
   spendGr: number;
   leadsCount: number;
   cplGr: number | null;
+  source: string; // MANUAL | META
   note: string | null;
 }
 
@@ -112,7 +113,12 @@ export function CampaignsCard({
           <TableBody>
             {campaigns.map((c) => (
               <TableRow key={c.id}>
-                <TableCell className="font-medium">{c.brandName}</TableCell>
+                <TableCell className="font-medium">
+                  <span className="flex items-center gap-1.5">
+                    {c.brandName}
+                    {c.source === "META" && <StatusBadge tone="blue">Meta</StatusBadge>}
+                  </span>
+                </TableCell>
                 <TableCell>{c.vertical}</TableCell>
                 <TableCell className="text-right tabular-nums">
                   {formatMoney(c.spendGr)}

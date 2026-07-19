@@ -320,10 +320,39 @@ model LeadCampaignMonth {
   spendGr    Int // wydatki NETTO w groszach
   leadsCount Int
   note       String?
+  source     String   @default("MANUAL") // MANUAL | META — proweniencja; sync z Mety nie nadpisuje MANUAL
   createdAt  DateTime @default(now())
 
   @@unique([period, brandId, vertical])
   @@index([period])
+}
+
+// Mapowanie kampanii Meta → marka + wertykal (wspólne/wiele kont reklamowych).
+// Kampanie zaciągane z całego portfolio; brandId/vertical null = niezmapowana;
+// ignored = pomijana (np. nie-leadowa). Klucz: metaCampaignId (globalnie unikalny).
+model MetaCampaignMap {
+  id               String   @id @default(cuid())
+  metaCampaignId   String   @unique
+  metaCampaignName String
+  adAccountId      String
+  adAccountName    String
+  brandId          String?
+  vertical         String?
+  ignored          Boolean  @default(false)
+  lastSeenAt       DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+// Log synchronizacji z Meta (status „ostatnia synchronizacja" + błędy).
+model MetaSyncRun {
+  id              String   @id @default(cuid())
+  ranAt           DateTime @default(now())
+  month           String // "RRRR-MM"
+  ok              Boolean
+  campaignsPulled Int      @default(0)
+  mappedCount     Int      @default(0)
+  unmappedSpendGr Int      @default(0)
+  error           String?
 }
 
 // Dostawa leadów do klienta w miesiącu. brandId null = mix marek →

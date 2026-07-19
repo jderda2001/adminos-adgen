@@ -32,6 +32,7 @@ import {
 import { computeVatFromNet } from "./calc";
 import { RW_CATEGORIES } from "./rw-types";
 import type { LeadForecastData } from "./lead-forecast";
+import { isMetaConfigured, isMetaMock } from "./meta-ads";
 import { DEFAULT_VERTICALS, isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
@@ -431,6 +432,7 @@ export interface LeadMonthData {
     spendGr: number;
     leadsCount: number;
     cplGr: number | null;
+    source: string; // MANUAL | META
     note: string | null;
   }[];
   deliveries: {
@@ -517,6 +519,7 @@ export async function getLeadMonthData(month: string): Promise<LeadMonthData> {
       spendGr: c.spendGr,
       leadsCount: c.leadsCount,
       cplGr: cplGr(c.spendGr, c.leadsCount),
+      source: c.source,
       note: c.note,
     }))
     .sort((a, b) => a.brandName.localeCompare(b.brandName, "pl") || a.vertical.localeCompare(b.vertical, "pl"));
@@ -814,6 +817,80 @@ export async function getVerticalsForManagement(): Promise<VerticalManageRow[]> 
     active: v.active,
     usageCount: usage.get(v.name) ?? 0,
   }));
+}
+
+// ── Integracja Meta (status + kampanie do mapowania) ────────────────
+
+export interface MetaStatus {
+  configured: boolean; // token obecny (realne dane) vs mock
+  mock: boolean;
+  lastRun: {
+    ranAt: string;
+    month: string;
+    ok: boolean;
+    campaignsPulled: number;
+    mappedCount: number;
+    unmappedSpendGr: number;
+    error: string | null;
+  } | null;
+  unmappedCount: number; // kampanie bez marki/wertykalu i nieoznaczone „ignoruj"
+}
+
+export async function getMetaStatus(): Promise<MetaStatus> {
+  const [last, unmappedCount] = await Promise.all([
+    db.metaSyncRun.findFirst({ orderBy: { ranAt: "desc" } }),
+    db.metaCampaignMap.count({
+      where: { ignored: false, OR: [{ brandId: null }, { vertical: null }] },
+    }),
+  ]);
+  return {
+    configured: isMetaConfigured(),
+    mock: isMetaMock(),
+    lastRun: last
+      ? {
+          ranAt: last.ranAt.toISOString(),
+          month: last.month,
+          ok: last.ok,
+          campaignsPulled: last.campaignsPulled,
+          mappedCount: last.mappedCount,
+          unmappedSpendGr: last.unmappedSpendGr,
+          error: last.error,
+        }
+      : null,
+    unmappedCount,
+  };
+}
+
+export interface MetaCampaignMapRow {
+  id: string;
+  metaCampaignId: string;
+  metaCampaignName: string;
+  adAccountId: string;
+  adAccountName: string;
+  brandId: string | null;
+  vertical: string | null;
+  ignored: boolean;
+}
+
+/** Kampanie Meta do mapowania (dialog) — posortowane: niezmapowane najpierw. */
+export async function getMetaCampaignsForMapping(): Promise<MetaCampaignMapRow[]> {
+  const rows = await db.metaCampaignMap.findMany({ orderBy: [{ adAccountName: "asc" }, { metaCampaignName: "asc" }] });
+  return rows
+    .map((r) => ({
+      id: r.id,
+      metaCampaignId: r.metaCampaignId,
+      metaCampaignName: r.metaCampaignName,
+      adAccountId: r.adAccountId,
+      adAccountName: r.adAccountName,
+      brandId: r.brandId,
+      vertical: r.vertical,
+      ignored: r.ignored,
+    }))
+    .sort((a, b) => {
+      const au = !a.ignored && (!a.brandId || !a.vertical) ? 0 : 1;
+      const bu = !b.ignored && (!b.brandId || !b.vertical) ? 0 : 1;
+      return au - bu;
+    });
 }
 
 // ── Dane wejściowe do prognozy leadów (moduł Estymacje) ─────────────

@@ -125,6 +125,26 @@ Cały interfejs PO POLSKU. Waluta PLN, kwoty w groszach (Int), formaty polskie.
   (`lib/brands-config.ts`) — jak `rw-people.json`. Skrypty
   `prisma/ensure-cost-categories.ts` i `prisma/ensure-brands.ts`
   (idempotentne, uruchamiane w deploy/update.sh; brak configu → brak marek).
+- **Integracja Meta Ads (portfolio)**: automatyczne zaciąganie wydatków i leadów
+  kampanii ze WSZYSTKICH kont reklamowych portfolio (`/me/adaccounts` →
+  `/{act}/insights`). Klient: `lib/meta-ads.ts` (`isMetaConfigured`, `isMetaMock`,
+  `fetchAdAccounts`, `fetchCampaignInsights`; tryb mock gdy brak `META_ACCESS_TOKEN`
+  lub `META_MOCK=1` — deterministyczne dane, bez sieci). Agregacja czysta:
+  `lib/meta-sync.ts` (`aggregateMetaToCampaignMonths` — sumuje kampanie per
+  marka×wertykal wg mapowania; niezmapowane → pula „nieprzypisane", ignorowane →
+  pomijane). Rdzeń zapisu: `lib/meta-sync-run.ts` (`runMetaSync(month)` — upsert
+  `MetaCampaignMap`, wpis `LeadCampaignMonth` z `source="META"` bez nadpisywania
+  `source="MANUAL"`, log `MetaSyncRun`; bez auth). Wołany przez: akcję
+  `syncMetaCampaignsAction` (przycisk „Zaciągnij z Mety", `requireAdmin`) oraz cron
+  `POST /api/cron/meta-sync` (nagłówek `x-cron-secret == CRON_SECRET`, działa tylko
+  gdy ustawienie `meta_autosync_enabled="1"`). Mapowanie kampania→marka+wertykal:
+  ręczne w UI (`meta-mapping-dialog.tsx`, autosave). **Zmienne środowiskowe**
+  (prod `.env`, nie w repo): `META_ACCESS_TOKEN` (System User token z `ads_read` +
+  `business_management`), `META_API_VERSION` (dom. `v21.0`),
+  `META_AD_ACCOUNT_ALLOWLIST` (opcjonalna, CSV `act_...`),
+  `META_LEAD_ACTION_TYPES` (dom. `lead,onsite_conversion.lead_grouped`),
+  `META_MOCK` (`1` = wymuś dane testowe), `CRON_SECRET` (sekret dla route cron).
+  Bez tokena moduł działa na mocku. **Nigdy nie commituj tokena** ani App Secret.
 - Polska odmiana liczebników: `pluralPl(n, one, few, many)` z `lib/format.ts`
   (np. `pluralPl(n, "faktura", "faktury", "faktur")`). Używaj wszędzie zamiast
   ręcznego `n === 1 ? … : …`.

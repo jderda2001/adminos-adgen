@@ -50,6 +50,22 @@ export async function saveProfitabilitySettingsAction(
   return ok("Ustawienia rentowności zostały zapisane");
 }
 
+// ── Integracje (Meta Ads) ────────────────────────────────────────────
+
+export async function saveMetaAutosyncAction(
+  formData: FormData
+): Promise<ActionResult> {
+  await requireAdmin();
+  const enabled = formData.get("metaAutosyncEnabled") === "1" ? "1" : "0";
+  await setSetting("meta_autosync_enabled", enabled);
+  revalidatePath("/ustawienia");
+  return ok(
+    enabled === "1"
+      ? "Codzienna synchronizacja z Meta włączona"
+      : "Codzienna synchronizacja z Meta wyłączona"
+  );
+}
+
 // ── Cele BOA (docelowy podział przychodu) ────────────────────────────
 
 const pctField = z.coerce

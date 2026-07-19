@@ -7,6 +7,8 @@ import {
   getActiveVerticalNames,
   getVerticalsForManagement,
   ensureCarriedLeadDeliveries,
+  getMetaStatus,
+  getMetaCampaignsForMapping,
 } from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
 import { todayUTC } from "@/lib/format";
@@ -18,6 +20,7 @@ import { MonthNav } from "./month-nav";
 import { CampaignsCard } from "./campaigns-card";
 import { DeliveriesCard } from "./deliveries-card";
 import { ReconciliationCard } from "./reconciliation-card";
+import { MetaSyncCard } from "./meta-sync-card";
 import { BrandsDialog, type BrandRow } from "./brands-dialog";
 import { VerticalsDialog } from "./verticals-dialog";
 import type { BrandOption } from "./campaign-dialog";
@@ -47,21 +50,30 @@ export default async function LeadyPage({
     await ensureCarriedLeadDeliveries(month);
   }
 
-  const [data, brandRows, clientRows, activeVerticals, verticalRowsForDialog] =
-    await Promise.all([
-      getLeadMonthData(month),
-      db.brand.findMany({
-        orderBy: { position: "asc" },
-        include: { _count: { select: { campaigns: true, deliveries: true } } },
-      }),
-      db.client.findMany({
-        where: { status: "ACTIVE" },
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, billingModel: true },
-      }),
-      getActiveVerticalNames(),
-      getVerticalsForManagement(),
-    ]);
+  const [
+    data,
+    brandRows,
+    clientRows,
+    activeVerticals,
+    verticalRowsForDialog,
+    metaStatus,
+    metaCampaigns,
+  ] = await Promise.all([
+    getLeadMonthData(month),
+    db.brand.findMany({
+      orderBy: { position: "asc" },
+      include: { _count: { select: { campaigns: true, deliveries: true } } },
+    }),
+    db.client.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, billingModel: true },
+    }),
+    getActiveVerticalNames(),
+    getVerticalsForManagement(),
+    getMetaStatus(),
+    getMetaCampaignsForMapping(),
+  ]);
 
   const brands: BrandOption[] = brandRows.map((b) => ({
     id: b.id,
@@ -117,6 +129,14 @@ export default async function LeadyPage({
       </PageHeader>
 
       <div className="space-y-4">
+        <MetaSyncCard
+          month={month}
+          status={metaStatus}
+          campaigns={metaCampaigns}
+          brands={brands}
+          verticals={activeVerticals}
+        />
+
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
           <KpiCard
             label="Wydatki na kampanie"

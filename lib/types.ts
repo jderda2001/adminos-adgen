@@ -117,6 +117,8 @@ export const SETTING_DEFAULTS = {
   boa_wlasciciele_pct: "23",
   boa_operacyjne_pct: "65",
   boa_podatki_pct: "3",
+  // codzienny automatyczny sync kampanii z Meta (cron) — "1" wł. / "0" wył.
+  meta_autosync_enabled: "0",
 } as const;
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 
