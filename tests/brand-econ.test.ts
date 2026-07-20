@@ -13,9 +13,9 @@ describe("buildBrandEconomics", () => {
     const rows = buildBrandEconomics({
       brands: BRANDS,
       campaigns: [
-        { brandId: "rst", spendGr: 320_000, leadsCount: 140 },
-        { brandId: "rst", spendGr: 140_000, leadsCount: 31 },
-        { brandId: "reb", spendGr: 100_000, leadsCount: 20 },
+        { brandId: "rst", vertical: "SKD", spendGr: 320_000, leadsCount: 140 },
+        { brandId: "rst", vertical: "Restrukturyzacje", spendGr: 140_000, leadsCount: 31 },
+        { brandId: "reb", vertical: "OZE", spendGr: 100_000, leadsCount: 20 },
       ],
       deliveries: [],
       unitPriceByClientVertical: new Map(),
@@ -27,6 +27,31 @@ describe("buildBrandEconomics", () => {
     expect(rst.spendGr).toBe(460_000);
     expect(rst.leadsCount).toBe(171);
     expect(rst.cplGr).toBe(Math.round(460_000 / 171));
+  });
+
+  it("rozbicie per wertykal: sumuje kampanie tej samej niszy, sort po spend malejąco", () => {
+    const rows = buildBrandEconomics({
+      brands: [BRANDS[0]],
+      campaigns: [
+        { brandId: "rst", vertical: "Służebności przesyłu", spendGr: 200_000, leadsCount: 1000 },
+        { brandId: "rst", vertical: "SKD", spendGr: 220_000, leadsCount: 10 },
+        { brandId: "rst", vertical: "SKD", spendGr: 100_000, leadsCount: 130 },
+        { brandId: "rst", vertical: "Restrukturyzacje", spendGr: 140_000, leadsCount: 31 },
+      ],
+      deliveries: [],
+      unitPriceByClientVertical: new Map(),
+      unitPriceByVertical: {},
+      budgets: new Map(),
+      accounts: [],
+    });
+    const v = rows[0].verticals;
+    expect(v.map((x) => x.vertical)).toEqual(["SKD", "Służebności przesyłu", "Restrukturyzacje"]);
+    const skd = v[0];
+    expect(skd.spendGr).toBe(320_000); // 220k + 100k zsumowane
+    expect(skd.leadsCount).toBe(140);
+    expect(skd.cplGr).toBe(Math.round(320_000 / 140));
+    // CPL per nisza ≠ CPL zbiorczy marki (blend) — po to jest rozbicie
+    expect(rows[0].cplGr).not.toBe(skd.cplGr);
   });
 
   it("przychód: cena klient×wertykal wygrywa, fallback cena wertykalu, reszta unpriced", () => {
@@ -53,7 +78,7 @@ describe("buildBrandEconomics", () => {
   it("marża = przychód − spend; procent od przychodu", () => {
     const rows = buildBrandEconomics({
       brands: [BRANDS[0]],
-      campaigns: [{ brandId: "rst", spendGr: 460_000, leadsCount: 171 }],
+      campaigns: [{ brandId: "rst", vertical: "SKD", spendGr: 460_000, leadsCount: 171 }],
       deliveries: [{ brandId: "rst", clientId: "votum", vertical: "SKD", leadsCount: 138 }],
       unitPriceByClientVertical: new Map(),
       unitPriceByVertical: { SKD: 10_000 },
@@ -67,7 +92,7 @@ describe("buildBrandEconomics", () => {
   it("budżet: remaining i usedPct; brak budżetu → null", () => {
     const rows = buildBrandEconomics({
       brands: BRANDS,
-      campaigns: [{ brandId: "rst", spendGr: 460_000, leadsCount: 171 }],
+      campaigns: [{ brandId: "rst", vertical: "SKD", spendGr: 460_000, leadsCount: 171 }],
       deliveries: [],
       unitPriceByClientVertical: new Map(),
       unitPriceByVertical: {},
@@ -85,7 +110,7 @@ describe("buildBrandEconomics", () => {
   it("przepał budżetu → remaining ujemny, usedPct > 100", () => {
     const rows = buildBrandEconomics({
       brands: [BRANDS[0]],
-      campaigns: [{ brandId: "rst", spendGr: 800_000, leadsCount: 100 }],
+      campaigns: [{ brandId: "rst", vertical: "SKD", spendGr: 800_000, leadsCount: 100 }],
       deliveries: [],
       unitPriceByClientVertical: new Map(),
       unitPriceByVertical: {},

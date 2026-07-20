@@ -95,8 +95,28 @@ export function BrandCards({
               </div>
               <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
                 {formatMoney(r.spendGr)}
-                {r.cplGr !== null && <> · CPL {formatMoney(r.cplGr)}</>}
+                {r.verticals.length <= 1 && r.cplGr !== null && <> · CPL {formatMoney(r.cplGr)}</>}
               </div>
+
+              {r.verticals.length > 1 && (
+                <div className="mt-2 space-y-0.5 border-t pt-2">
+                  {r.verticals.map((v) => (
+                    <div
+                      key={v.vertical}
+                      className="flex items-baseline justify-between gap-2 text-xs tabular-nums"
+                    >
+                      <span className="truncate text-muted-foreground">{v.vertical}</span>
+                      <span className="shrink-0">
+                        {v.leadsCount}
+                        <span className="text-muted-foreground">
+                          {" · "}
+                          {v.cplGr !== null ? `CPL ${formatMoney(v.cplGr)}` : "—"}
+                        </span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-2 text-xs tabular-nums">
                 przychód {formatMoney(r.revenueGr)}

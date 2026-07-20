@@ -13,8 +13,16 @@ export interface BrandLike {
 
 export interface BrandCampaignMonthLike {
   brandId: string;
+  vertical: string;
   spendGr: number;
   leadsCount: number;
+}
+
+export interface BrandVerticalStat {
+  vertical: string;
+  leadsCount: number;
+  spendGr: number;
+  cplGr: number | null;
 }
 
 export interface BrandDeliveryLike {
@@ -37,6 +45,7 @@ export interface BrandEconRow {
   leadsCount: number; // leady z kampanii Meta/ręcznych
   spendGr: number;
   cplGr: number | null;
+  verticals: BrandVerticalStat[]; // rozbicie per wertykal (sort: spend malejąco)
   deliveredLeads: number; // leady dostarczone klientom (z tej marki)
   revenueGr: number; // wycena dostaw po cenach jednostkowych (tylko wycenione)
   unpricedLeads: number; // dostarczone leady bez znanej ceny
@@ -58,11 +67,19 @@ export function buildBrandEconomics(input: {
   accounts: readonly BrandAccountLike[];
 }): BrandEconRow[] {
   const spend = new Map<string, { spendGr: number; leadsCount: number }>();
+  const byVertical = new Map<string, Map<string, { spendGr: number; leadsCount: number }>>();
   for (const c of input.campaigns) {
     const prev = spend.get(c.brandId) ?? { spendGr: 0, leadsCount: 0 };
     prev.spendGr += c.spendGr;
     prev.leadsCount += c.leadsCount;
     spend.set(c.brandId, prev);
+
+    const vMap = byVertical.get(c.brandId) ?? new Map();
+    const vPrev = vMap.get(c.vertical) ?? { spendGr: 0, leadsCount: 0 };
+    vPrev.spendGr += c.spendGr;
+    vPrev.leadsCount += c.leadsCount;
+    vMap.set(c.vertical, vPrev);
+    byVertical.set(c.brandId, vMap);
   }
 
   const rev = new Map<string, { revenueGr: number; delivered: number; unpriced: number }>();
@@ -89,6 +106,14 @@ export function buildBrandEconomics(input: {
   return input.brands.map((b) => {
     const s = spend.get(b.id) ?? { spendGr: 0, leadsCount: 0 };
     const r = rev.get(b.id) ?? { revenueGr: 0, delivered: 0, unpriced: 0 };
+    const verticals: BrandVerticalStat[] = [...(byVertical.get(b.id) ?? new Map()).entries()]
+      .map(([vertical, v]) => ({
+        vertical,
+        leadsCount: v.leadsCount,
+        spendGr: v.spendGr,
+        cplGr: v.leadsCount > 0 ? Math.round(v.spendGr / v.leadsCount) : null,
+      }))
+      .sort((a, x) => x.spendGr - a.spendGr);
     const budgetGr = input.budgets.get(b.id) ?? null;
     const hasAny = s.spendGr !== 0 || r.revenueGr !== 0;
     const marginGr = hasAny ? r.revenueGr - s.spendGr : null;
@@ -99,6 +124,7 @@ export function buildBrandEconomics(input: {
       leadsCount: s.leadsCount,
       spendGr: s.spendGr,
       cplGr: s.leadsCount > 0 ? Math.round(s.spendGr / s.leadsCount) : null,
+      verticals,
       deliveredLeads: r.delivered,
       revenueGr: r.revenueGr,
       unpricedLeads: r.unpriced,

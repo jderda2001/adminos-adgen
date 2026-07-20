@@ -979,7 +979,7 @@ export async function getBrandEconomics(month: string): Promise<BrandEconomics> 
     }),
     db.leadCampaignMonth.findMany({
       where: { period: month },
-      select: { brandId: true, spendGr: true, leadsCount: true },
+      select: { brandId: true, vertical: true, spendGr: true, leadsCount: true },
     }),
     db.leadDelivery.findMany({
       where: { period: month },
