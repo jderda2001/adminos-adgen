@@ -2,8 +2,9 @@
 
 // Nawigacja miesięczna modułu Leady — MonthPicker + strzałki prev/next,
 // stan w URL (?od=RRRR-MM). Celowo bez kwartał/rok — dane są miesięczne.
+// Pozostałe parametry URL (np. ?w= na stronie niszy) są zachowywane.
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MonthPicker } from "@/components/month-picker";
@@ -18,7 +19,12 @@ function prevMonthKey(key: string): string {
 export function MonthNav({ month }: { month: string }) {
   const router = useRouter();
   const pathname = usePathname();
-  const go = (m: string) => router.replace(`${pathname}?od=${m}`, { scroll: false });
+  const searchParams = useSearchParams();
+  const go = (m: string) => {
+    const q = new URLSearchParams(searchParams);
+    q.set("od", m);
+    router.replace(`${pathname}?${q.toString()}`, { scroll: false });
+  };
 
   return (
     <div className="flex items-center gap-1.5">

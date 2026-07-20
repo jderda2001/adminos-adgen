@@ -55,6 +55,7 @@ export function DeliveryDialog({
   verticals,
   verticalsWithCampaign,
   delivery,
+  defaultVertical,
   trigger,
 }: {
   month: string;
@@ -64,6 +65,8 @@ export function DeliveryDialog({
   verticalsWithCampaign: string[];
   /** undefined = nowa dostawa */
   delivery?: DeliveryFormData;
+  /** wstępnie wybrany wertykal (strona niszy) */
+  defaultVertical?: string;
   trigger: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -77,17 +80,19 @@ export function DeliveryDialog({
   const leadClients = clients.filter((c) => c.isLeadClient);
   const otherClients = clients.filter((c) => !c.isLeadClient);
   const brandOptions = brands.filter((b) => b.active || b.id === delivery?.brandId);
-  const verticalOptions =
-    delivery && !verticals.includes(delivery.vertical)
-      ? [delivery.vertical, ...verticals]
-      : verticals;
+  // wertykal edytowanej dostawy / wstępnie wybrany może być już nieaktywny —
+  // dokładamy go do opcji, żeby Select nie pokazał pustki
+  const extraVertical = [delivery?.vertical, defaultVertical].find(
+    (v): v is string => !!v && !verticals.includes(v)
+  );
+  const verticalOptions = extraVertical ? [extraVertical, ...verticals] : verticals;
 
   function handleOpenChange(next: boolean) {
     if (pending) return;
     setOpen(next);
     if (next) {
       setClientId(delivery?.clientId ?? "");
-      setVertical(delivery?.vertical ?? "");
+      setVertical(delivery?.vertical ?? defaultVertical ?? "");
       setBrandSel(delivery?.brandId ?? MIX_VALUE);
       setLeads(delivery ? String(delivery.leadsCount) : "");
       setNote(delivery?.note ?? "");

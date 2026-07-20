@@ -12,9 +12,9 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { parseMoneyToGr, pluralPl } from "@/lib/format";
-import { DEFAULT_VERTICALS } from "@/lib/types";
+import { DEFAULT_VERTICALS, LEAD_TAG_PREFIX } from "@/lib/types";
 
-const PATHS = ["/leady", "/rentownosc", "/dashboard"] as const;
+const PATHS = ["/leady", "/leady/nisza", "/rentownosc", "/dashboard"] as const;
 function revalidateAll() {
   for (const p of PATHS) revalidatePath(p);
 }
@@ -215,34 +215,38 @@ export async function setDeliveredAction(input: {
   if (!client) return fail("Wybrany klient nie istnieje");
   if (!(await isKnownVertical(d.vertical))) return fail("Nieznany wertykal");
 
-  const existing = await db.leadDelivery.findMany({
-    where: { period: d.period, clientId: d.clientId, vertical: d.vertical },
-    orderBy: { createdAt: "asc" },
-    select: { id: true },
-  });
+  // transakcja: kolaps do jednego wiersza nie może przeplatać się z równoległym
+  // zapisem (dwie karty przeglądarki) — inaczej powstałyby zdublowane dostawy
+  await db.$transaction(async (tx) => {
+    const existing = await tx.leadDelivery.findMany({
+      where: { period: d.period, clientId: d.clientId, vertical: d.vertical },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
 
-  if (existing.length === 0) {
-    await db.leadDelivery.create({
-      data: {
-        period: d.period,
-        clientId: d.clientId,
-        vertical: d.vertical,
-        brandId: null, // mix — koszt liczony po średniej CPL wertykalu
-        leadsCount,
-        estimated: false,
-      },
-    });
-  } else {
-    // aktualizuj najstarszy wpis (zachowuje przypisaną markę), usuń pozostałe
-    const [keep, ...rest] = existing;
-    await db.leadDelivery.update({
-      where: { id: keep.id },
-      data: { leadsCount, estimated: false },
-    });
-    if (rest.length > 0) {
-      await db.leadDelivery.deleteMany({ where: { id: { in: rest.map((r) => r.id) } } });
+    if (existing.length === 0) {
+      await tx.leadDelivery.create({
+        data: {
+          period: d.period,
+          clientId: d.clientId,
+          vertical: d.vertical,
+          brandId: null, // mix — koszt liczony po średniej CPL wertykalu
+          leadsCount,
+          estimated: false,
+        },
+      });
+    } else {
+      // aktualizuj najstarszy wpis (zachowuje przypisaną markę), usuń pozostałe
+      const [keep, ...rest] = existing;
+      await tx.leadDelivery.update({
+        where: { id: keep.id },
+        data: { leadsCount, estimated: false },
+      });
+      if (rest.length > 0) {
+        await tx.leadDelivery.deleteMany({ where: { id: { in: rest.map((r) => r.id) } } });
+      }
     }
-  }
+  });
 
   revalidateAll();
   return ok("Zapisano dowiezione");
@@ -339,14 +343,28 @@ export async function renameVerticalAction(id: string, name: string): Promise<Ac
   if (!current) return fail("Wertykal nie istnieje");
   const clash = await db.leadVertical.findUnique({ where: { name: parsed.data } });
   if (clash && clash.id !== id) return fail("Wertykal o tej nazwie już istnieje");
-  // przepisz nazwę na istniejących kampaniach/dostawach (wertykal to string)
-  await db.$transaction([
-    db.leadVertical.update({ where: { id }, data: { name: parsed.data } }),
-    db.leadCampaignMonth.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } }),
-    db.leadDelivery.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } }),
-  ]);
+  // przepisz nazwę na kampaniach/dostawach (wertykal to string) ORAZ w tagach
+  // faktur — kontrakt czytany jest z tagu „Leady: <nazwa>", bez tego kontrakty
+  // zostałyby pod starą nazwą i nisza rozjechałaby się na dwie
+  const oldTag = `${LEAD_TAG_PREFIX}${current.name}`;
+  const newTag = `${LEAD_TAG_PREFIX}${parsed.data}`;
+  await db.$transaction(async (tx) => {
+    await tx.leadVertical.update({ where: { id }, data: { name: parsed.data } });
+    await tx.leadCampaignMonth.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } });
+    await tx.leadDelivery.updateMany({ where: { vertical: current.name }, data: { vertical: parsed.data } });
+    const invoices = await tx.invoice.findMany({
+      where: { offerTags: { contains: oldTag } },
+      select: { id: true, offerTags: true },
+    });
+    for (const inv of invoices) {
+      const tags = (inv.offerTags ?? "").split(",").map((t) => t.trim());
+      if (!tags.includes(oldTag)) continue; // contains był tylko prefiltrem
+      const next = tags.map((t) => (t === oldTag ? newTag : t)).join(",");
+      await tx.invoice.update({ where: { id: inv.id }, data: { offerTags: next } });
+    }
+  });
   revalidateVerticals();
-  return ok("Nazwa wertykalu zapisana (zaktualizowano kampanie i dostawy)");
+  return ok("Nazwa wertykalu zapisana (zaktualizowano kampanie, dostawy i faktury)");
 }
 
 export async function toggleVerticalActiveAction(id: string, active: boolean): Promise<ActionResult> {
@@ -360,14 +378,16 @@ export async function deleteVerticalAction(id: string): Promise<ActionResult> {
   await requireAdmin();
   const v = await db.leadVertical.findUnique({ where: { id } });
   if (!v) return fail("Wertykal nie istnieje");
-  const [campaigns, deliveries] = await Promise.all([
+  const [campaigns, deliveries, invoices] = await Promise.all([
     db.leadCampaignMonth.count({ where: { vertical: v.name } }),
     db.leadDelivery.count({ where: { vertical: v.name } }),
+    // kontrakty żyją w tagach faktur — wertykal użyty na fakturze też blokuje
+    db.invoice.count({ where: { offerTags: { contains: `${LEAD_TAG_PREFIX}${v.name}` } } }),
   ]);
-  const usage = campaigns + deliveries;
+  const usage = campaigns + deliveries + invoices;
   if (usage > 0) {
     return fail(
-      `Nie można usunąć — wertykal ma ${usage} ${pluralPl(usage, "wpis", "wpisy", "wpisów")} (kampanie/dostawy). Wyłącz go zamiast usuwać.`
+      `Nie można usunąć — wertykal ma ${usage} ${pluralPl(usage, "wpis", "wpisy", "wpisów")} (kampanie/dostawy/faktury). Wyłącz go zamiast usuwać.`
     );
   }
   await db.leadVertical.delete({ where: { id } });

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ChevronDown, Settings2 } from "lucide-react";
+import { ChevronDown, Plus, Settings2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import {
@@ -14,28 +14,26 @@ import {
   getLeadFulfillment,
 } from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
-import { todayUTC, formatMoney } from "@/lib/format";
+import { todayUTC, formatMoney, pluralPl } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { AdBudgetSummary } from "@/components/ad-budget-summary";
 import { MonthNav } from "./month-nav";
 import { CampaignsCard } from "./campaigns-card";
 import { ReconciliationCard } from "./reconciliation-card";
 import { MetaSyncCard } from "./meta-sync-card";
 import { BrandCards } from "./brand-cards";
-import { FulfillmentCard, type FulfillmentRow, type VerticalSection } from "./fulfillment-card";
-import { FulfillmentPlanCard } from "./fulfillment-plan-card";
+import { MonthSummary } from "./month-summary";
+import { VerticalCards, type VerticalCardData } from "./vertical-cards";
 import { BrandsDialog, type BrandRow } from "./brands-dialog";
 import { VerticalsDialog } from "./verticals-dialog";
+import { DeliveryDialog, type ClientOption } from "./delivery-dialog";
 import type { BrandOption } from "./campaign-dialog";
-import type { ClientOption } from "./delivery-dialog";
 
 export const metadata: Metadata = { title: "Leady" };
 
-// Ekonomika leadów w jednym pytaniu: „czy marki wewnętrzne się spinają?".
-// Karty marek (leady/spend/CPL/przychód/marża/budżet) + dostawy do klientów +
-// cash flow do końca miesiąca. Szczegóły (kampanie per wertykal, uzgodnienie)
-// zwinięte na dole — nie zawalają głównego widoku.
+// Widok główny celowo lekki: 3 karty podsumowania (pula z Mety, dowiezienie,
+// budżet) + karty nisz z paskami postępu. Klienci i edycja dostaw są na
+// osobnej stronie niszy (/leady/nisza). Marki i uzgodnienie — zwinięte.
 export default async function LeadyPage({
   searchParams,
 }: {
@@ -105,51 +103,72 @@ export default async function LeadyPage({
 
   const unassignedGr = data.bookedAdCostsGr - data.totals.assignedCostGr;
 
-  // dostawy vs kontrakt pogrupowane po WERTYKALU (niszy): pula leadów
-  // (wygenerowane w Mecie → przypisane klientom → nieprzypisane) + wiersze klientów
-  // (kontrakt z Przychodów, dług narastająco, koszt = dowiezione × CPL wertykalu)
-  const rowsByVertical = new Map<string, FulfillmentRow[]>();
+  // karty nisz: pula (wygenerowane→przypisane→leżące) + dowiezienie kontraktów
+  // + estymacja „dołóż" (z planu realizacji). Pasek dowiezienia liczymy na
+  // wartościach obciętych per klient (covered = min(dowiezione, zobowiązanie)),
+  // żeby nadwyżka jednego klienta nie maskowała długu innego.
+  const byVertical = new Map<
+    string,
+    { owedPos: number; covered: number; assigned: number; remaining: number; clientCount: number }
+  >();
   for (const s of fulfillment.statuses) {
-    const cpl = fulfillment.cplByVertical[s.vertical] ?? null;
-    const row: FulfillmentRow = {
-      clientId: s.clientId,
-      clientName: s.clientName,
-      vertical: s.vertical,
-      owed: s.owed,
-      delivered: s.deliveredThisMonth,
-      balance: s.balance,
-      costGr: cpl !== null ? Math.round(s.deliveredThisMonth * cpl) : 0,
+    const v = byVertical.get(s.vertical) ?? {
+      owedPos: 0,
+      covered: 0,
+      assigned: 0,
+      remaining: 0,
+      clientCount: 0,
     };
-    const arr = rowsByVertical.get(s.vertical) ?? [];
-    arr.push(row);
-    rowsByVertical.set(s.vertical, arr);
+    const owedPos = Math.max(0, s.owed);
+    v.owedPos += owedPos;
+    v.covered += Math.min(s.deliveredThisMonth, owedPos);
+    v.assigned += s.deliveredThisMonth;
+    v.remaining += Math.max(0, s.balance);
+    v.clientCount += 1;
+    byVertical.set(s.vertical, v);
   }
-  // wertykały: te z kontraktem/dostawą + te, które coś wygenerowały (nawet bez kontraktów)
-  const sectionVerticals = new Set<string>([
-    ...rowsByVertical.keys(),
+  const cardVerticals = new Set<string>([
+    ...byVertical.keys(),
     ...Object.keys(fulfillment.generatedByVertical),
   ]);
-  const fulfillmentSections: VerticalSection[] = [...sectionVerticals]
+  const planByVertical = new Map(fulfillment.plan.verticals.map((v) => [v.vertical, v]));
+  const cards: VerticalCardData[] = [...cardVerticals]
     .map((vertical) => {
-      const rows = (rowsByVertical.get(vertical) ?? []).sort(
-        (a, b) => b.balance - a.balance || a.clientName.localeCompare(b.clientName, "pl")
-      );
-      const assigned = rows.reduce((n, r) => n + r.delivered, 0);
+      const agg = byVertical.get(vertical) ?? {
+        owedPos: 0,
+        covered: 0,
+        assigned: 0,
+        remaining: 0,
+        clientCount: 0,
+      };
       const generated = fulfillment.generatedByVertical[vertical] ?? 0;
       return {
         vertical,
         cplGr: fulfillment.cplByVertical[vertical] ?? null,
         generated,
-        assigned,
-        unassigned: generated - assigned,
-        rows,
+        assigned: agg.assigned,
+        unassigned: generated - agg.assigned,
+        owed: agg.owedPos,
+        delivered: agg.covered,
+        remaining: agg.remaining,
+        addSpendGr: planByVertical.get(vertical)?.budgetIncreaseGr ?? 0,
+        clientCount: agg.clientCount,
       };
     })
-    .sort((a, b) => {
-      const owedA = a.rows.reduce((n, r) => n + Math.max(0, r.balance), 0);
-      const owedB = b.rows.reduce((n, r) => n + Math.max(0, r.balance), 0);
-      return owedB - owedA || b.generated - a.generated || a.vertical.localeCompare(b.vertical, "pl");
-    });
+    .sort(
+      (a, b) =>
+        b.remaining - a.remaining ||
+        b.generated - a.generated ||
+        a.vertical.localeCompare(b.vertical, "pl")
+    );
+
+  // sumy do podsumowania — „leży" liczone per nisza (bez nettowania między
+  // niszami: dostawa w niszy bez kampanii nie maskuje leżących leadów innej)
+  const totalGenerated = cards.reduce((s, c) => s + c.generated, 0);
+  const totalPoolAssigned = cards.reduce((s, c) => s + Math.min(c.assigned, c.generated), 0);
+  const totalUnassigned = cards.reduce((s, c) => s + Math.max(0, c.unassigned), 0);
+  const totalOwed = cards.reduce((s, c) => s + c.owed, 0);
+  const totalCovered = cards.reduce((s, c) => s + c.delivered, 0);
 
   // wertykale z użyteczną kampanią (leady>0) — dla dialogu dostawy (wycena CPL)
   const verticalsWithCampaign = [
@@ -162,10 +181,7 @@ export default async function LeadyPage({
 
   return (
     <>
-      <PageHeader
-        title="Leady"
-        description="Marki wewnętrzne: ile leadów generują, za ile i czy budżet się spina"
-      >
+      <PageHeader title="Leady" description="Generowanie i dowiezienie leadów">
         <MonthNav month={month} />
         <VerticalsDialog
           verticals={verticalRowsForDialog}
@@ -198,49 +214,65 @@ export default async function LeadyPage({
         {estimatedCount > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             {estimatedCount}{" "}
-            {estimatedCount === 1
-              ? "dostawa została przeniesiona automatycznie z poprzedniego miesiąca"
-              : "dostaw zostało przeniesionych automatycznie z poprzedniego miesiąca"}{" "}
-            (oznaczone „estymacja") — sprawdź liczby i zapisz, aby potwierdzić.
+            {pluralPl(
+              estimatedCount,
+              "dostawa została przeniesiona automatycznie",
+              "dostawy zostały przeniesione automatycznie",
+              "dostaw zostało przeniesionych automatycznie"
+            )}{" "}
+            z poprzedniego miesiąca — potwierdź liczby na stronach nisz (znacznik „estymacja").
           </div>
         )}
 
         {unpricedDeliveries.length > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             {unpricedDeliveries.length}{" "}
-            {unpricedDeliveries.length === 1
-              ? "dostawa nie ma kampanii do wyceny"
-              : "dostaw nie ma kampanii do wyceny"}{" "}
-            (koszt 0 zł) — wpisz kampanię dla wertykali:{" "}
+            {pluralPl(
+              unpricedDeliveries.length,
+              "dostawa nie ma kampanii do wyceny",
+              "dostawy nie mają kampanii do wyceny",
+              "dostaw nie ma kampanii do wyceny"
+            )}{" "}
+            (koszt 0 zł) — wertykale:{" "}
             <span className="font-medium">
               {[...new Set(unpricedDeliveries.map((d) => d.vertical))].join(", ")}
             </span>
-            . Do tego czasu koszt leadów tych klientów jest zaniżony.
+            .
           </div>
         )}
 
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-          <FulfillmentCard
+        <MonthSummary
+          generated={totalGenerated}
+          poolAssigned={totalPoolAssigned}
+          unassigned={totalUnassigned}
+          covered={totalCovered}
+          owed={totalOwed}
+          plan={fulfillment.plan}
+          budget={adBudget}
+        />
+
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <h2 className="text-sm font-semibold">Nisze</h2>
+          <DeliveryDialog
             month={month}
-            sections={fulfillmentSections}
             brands={brands}
             clients={clients}
             verticals={activeVerticals}
             verticalsWithCampaign={verticalsWithCampaign}
+            trigger={
+              <Button variant="outline" size="sm">
+                <Plus data-icon="inline-start" /> Dodaj dostawę
+              </Button>
+            }
           />
-          <div className="space-y-4">
-            <AdBudgetSummary status={adBudget} />
-            <FulfillmentPlanCard plan={fulfillment.plan} />
-          </div>
         </div>
+        <VerticalCards month={month} cards={cards} />
 
         <details className="group rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
             <span>
               Marki wewnętrzne
-              <span className="ml-2 font-normal">
-                przychód, marża i CPL per marka · klik w kartę → szczegóły
-              </span>
+              <span className="ml-2 font-normal">przychód, marża i CPL per marka</span>
             </span>
             <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
           </summary>
