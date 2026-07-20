@@ -1,10 +1,10 @@
-// Podsumowanie miesiąca w 3 kartach z paskami postępu (minimum tekstu):
+// Podsumowanie miesiąca w 3 kartach z wykresami donut (minimum tekstu):
 // pula z Mety (przypisane/wygenerowane), dowiezienie kontraktów i budżet
-// do końca miesiąca. Zastępuje dawne karty tekstowe „Do końca miesiąca"
-// i „Ile jeszcze dowieźć" — szczegóły per nisza są na kartach nisz.
+// do końca miesiąca. Szczegóły per nisza są na kartach nisz.
 
 import { formatMoney } from "@/lib/format";
-import { ProgressBar } from "@/components/progress-bar";
+import { DonutChart } from "@/components/donut-chart";
+import type { ProgressTone } from "@/components/progress-bar";
 import type { AdBudgetStatus } from "@/lib/reports";
 import type { FulfillmentPlan } from "@/lib/lead-fulfillment";
 
@@ -12,26 +12,32 @@ function SummaryCard({
   label,
   value,
   valueSuffix,
-  bar,
+  donutValue,
+  donutMax,
+  tone,
   foot,
 }: {
   label: string;
   value: string;
   valueSuffix?: string;
-  bar: React.ReactNode;
+  donutValue: number;
+  donutMax: number;
+  tone: ProgressTone;
   foot: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]">
-      <div className="text-xs font-medium text-muted-foreground">{label}</div>
-      <div className="mt-2 truncate text-xl font-semibold tabular-nums tracking-tight">
-        {value}
-        {valueSuffix && (
-          <span className="ml-1 text-sm font-normal text-muted-foreground">{valueSuffix}</span>
-        )}
+    <div className="flex items-center gap-4 rounded-2xl border bg-card p-4 shadow-[var(--shadow-card)]">
+      <DonutChart value={donutValue} max={donutMax} tone={tone} />
+      <div className="min-w-0 flex-1">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        <div className="mt-1 truncate text-xl font-semibold tabular-nums tracking-tight">
+          {value}
+          {valueSuffix && (
+            <span className="ml-1 text-sm font-normal text-muted-foreground">{valueSuffix}</span>
+          )}
+        </div>
+        <div className="mt-1 truncate text-xs text-muted-foreground tabular-nums">{foot}</div>
       </div>
-      <div className="mt-2.5">{bar}</div>
-      <div className="mt-2 truncate text-xs text-muted-foreground tabular-nums">{foot}</div>
     </div>
   );
 }
@@ -46,9 +52,9 @@ export function MonthSummary({
   budget,
 }: {
   generated: number; // Σ leadów wygenerowanych w Mecie (ten miesiąc)
-  poolAssigned: number; // Σ min(przypisane, wygenerowane) per nisza — do paska puli
+  poolAssigned: number; // Σ min(przypisane, wygenerowane) per nisza — do donuta puli
   unassigned: number; // Σ max(0, wygenerowane − przypisane) per nisza (leżące)
-  covered: number; // Σ min(dowiezione, zobowiązanie) per klient — do paska dowiezienia
+  covered: number; // Σ min(dowiezione, zobowiązanie) per klient — do donuta dowiezienia
   owed: number; // Σ dodatnich zobowiązań (kontrakt + dług)
   plan: FulfillmentPlan;
   budget: AdBudgetStatus;
@@ -61,7 +67,9 @@ export function MonthSummary({
         label="Wygenerowane w Mecie"
         value={String(generated)}
         valueSuffix="leadów"
-        bar={<ProgressBar value={poolAssigned} max={generated} tone="blue" />}
+        donutValue={poolAssigned}
+        donutMax={generated}
+        tone="blue"
         foot={
           unassigned > 0 ? (
             <>
@@ -77,7 +85,9 @@ export function MonthSummary({
         label="Dowiezienie kontraktów"
         value={String(covered)}
         valueSuffix={`/ ${owed}`}
-        bar={<ProgressBar value={covered} max={owed} />}
+        donutValue={covered}
+        donutMax={owed}
+        tone="auto"
         foot={
           plan.totalRemaining > 0 ? (
             <>
@@ -97,13 +107,9 @@ export function MonthSummary({
         label={budget.daysLeft > 0 ? `Budżet · ${budget.daysLeft} dni do końca` : "Budżet · miesiąc zamknięty"}
         value={formatMoney(budget.spentGr)}
         valueSuffix={budget.planGr > 0 ? `/ ${formatMoney(budget.planGr)}` : undefined}
-        bar={
-          <ProgressBar
-            value={budget.spentGr}
-            max={budget.planGr}
-            tone={over ? "red" : "primary"}
-          />
-        }
+        donutValue={budget.spentGr}
+        donutMax={budget.planGr}
+        tone={over ? "red" : "primary"}
         foot={
           over ? (
             <span className="font-medium text-red-600 dark:text-red-400">
