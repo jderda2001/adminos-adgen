@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Settings2 } from "lucide-react";
+import { ChevronDown, Settings2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import {
@@ -8,19 +8,21 @@ import {
   getVerticalsForManagement,
   ensureCarriedLeadDeliveries,
   getMetaStatus,
-  getMetaCampaignsForMapping,
+  getMetaMappingData,
+  getBrandEconomics,
+  getAdBudgetStatus,
 } from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
-import { todayUTC } from "@/lib/format";
+import { todayUTC, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { KpiCard } from "@/components/kpi-card";
 import { Button } from "@/components/ui/button";
-import { formatMoney } from "@/lib/format";
+import { AdBudgetSummary } from "@/components/ad-budget-summary";
 import { MonthNav } from "./month-nav";
 import { CampaignsCard } from "./campaigns-card";
 import { DeliveriesCard } from "./deliveries-card";
 import { ReconciliationCard } from "./reconciliation-card";
 import { MetaSyncCard } from "./meta-sync-card";
+import { BrandCards } from "./brand-cards";
 import { BrandsDialog, type BrandRow } from "./brands-dialog";
 import { VerticalsDialog } from "./verticals-dialog";
 import type { BrandOption } from "./campaign-dialog";
@@ -28,9 +30,10 @@ import type { ClientOption } from "./delivery-dialog";
 
 export const metadata: Metadata = { title: "Leady" };
 
-// Ekonomika leadów: kampanie marek wewnętrznych (marka × wertykal, spend+leady
-// z Meta Ads Manager → CPL) i dostawy leadów do klientów (koszt = leady × CPL,
-// wchodzi do rentowności klienta). Uzgodnienie z przelewami do Mety w Kosztach.
+// Ekonomika leadów w jednym pytaniu: „czy marki wewnętrzne się spinają?".
+// Karty marek (leady/spend/CPL/przychód/marża/budżet) + dostawy do klientów +
+// cash flow do końca miesiąca. Szczegóły (kampanie per wertykal, uzgodnienie)
+// zwinięte na dole — nie zawalają głównego widoku.
 export default async function LeadyPage({
   searchParams,
 }: {
@@ -57,7 +60,9 @@ export default async function LeadyPage({
     activeVerticals,
     verticalRowsForDialog,
     metaStatus,
-    metaCampaigns,
+    mapping,
+    brandEcon,
+    adBudget,
   ] = await Promise.all([
     getLeadMonthData(month),
     db.brand.findMany({
@@ -72,7 +77,9 @@ export default async function LeadyPage({
     getActiveVerticalNames(),
     getVerticalsForManagement(),
     getMetaStatus(),
-    getMetaCampaignsForMapping(),
+    getMetaMappingData(),
+    getBrandEconomics(month),
+    getAdBudgetStatus(month),
   ]);
 
   const brands: BrandOption[] = brandRows.map((b) => ({
@@ -107,7 +114,7 @@ export default async function LeadyPage({
     <>
       <PageHeader
         title="Leady"
-        description="Kampanie marek wewnętrznych i dostawy leadów do klientów — CPL i koszt leadów per klient"
+        description="Marki wewnętrzne: ile leadów generują, za ile i czy budżet się spina"
       >
         <MonthNav month={month} />
         <VerticalsDialog
@@ -132,39 +139,13 @@ export default async function LeadyPage({
         <MetaSyncCard
           month={month}
           status={metaStatus}
-          campaigns={metaCampaigns}
+          accounts={mapping.accounts}
+          campaigns={mapping.campaigns}
           brands={brands}
           verticals={activeVerticals}
         />
 
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-          <KpiCard
-            label="Wydatki na kampanie"
-            value={formatMoney(data.totals.spendGr)}
-            sub="netto, z Meta Ads Manager"
-          />
-          <KpiCard
-            label="Leady z kampanii"
-            value={String(data.totals.campaignLeads)}
-            sub={`dostarczone klientom: ${data.totals.deliveredLeads}`}
-          />
-          <KpiCard
-            label="Śr. CPL"
-            value={data.totals.avgCplGr !== null ? formatMoney(data.totals.avgCplGr) : "—"}
-            sub="wydatki / leady"
-          />
-          <KpiCard
-            label="Koszt przypisany klientom"
-            value={formatMoney(data.totals.assignedCostGr)}
-            sub="suma dostaw × CPL"
-          />
-          <KpiCard
-            label="Nieprzypisany spend"
-            value={formatMoney(unassignedGr)}
-            sub="księgowania − przypisane"
-            tone={unassignedGr > 0 ? "warning" : unassignedGr < 0 ? "negative" : "default"}
-          />
-        </div>
+        <BrandCards month={month} rows={brandEcon.rows} daysLeft={brandEcon.daysLeft} />
 
         {estimatedCount > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
@@ -190,24 +171,44 @@ export default async function LeadyPage({
           </div>
         )}
 
-        <CampaignsCard
-          month={month}
-          campaigns={data.campaigns}
-          brands={brands}
-          verticals={activeVerticals}
-        />
-        <DeliveriesCard
-          month={month}
-          deliveries={data.deliveries}
-          brands={brands}
-          clients={clients}
-          verticals={activeVerticals}
-          verticalsWithCampaign={verticalsWithCampaign}
-        />
-        <ReconciliationCard
-          campaignSpendGr={data.totals.spendGr}
-          bookedAdCostsGr={data.bookedAdCostsGr}
-        />
+        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+          <DeliveriesCard
+            month={month}
+            deliveries={data.deliveries}
+            brands={brands}
+            clients={clients}
+            verticals={activeVerticals}
+            verticalsWithCampaign={verticalsWithCampaign}
+          />
+          <AdBudgetSummary status={adBudget} />
+        </div>
+
+        <details className="group rounded-xl border bg-card shadow-[var(--shadow-card)]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <span>
+              Szczegóły i uzgodnienie
+              <span className="ml-2 font-normal">
+                kampanie per wertykal · uzgodnienie z Kosztami
+                {unassignedGr !== 0 && (
+                  <> · nieprzypisany spend {formatMoney(unassignedGr)}</>
+                )}
+              </span>
+            </span>
+            <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="space-y-4 border-t px-4 pb-4 pt-4">
+            <CampaignsCard
+              month={month}
+              campaigns={data.campaigns}
+              brands={brands}
+              verticals={activeVerticals}
+            />
+            <ReconciliationCard
+              campaignSpendGr={data.totals.spendGr}
+              bookedAdCostsGr={data.bookedAdCostsGr}
+            />
+          </div>
+        </details>
       </div>
     </>
   );

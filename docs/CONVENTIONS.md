@@ -129,16 +129,32 @@ Cały interfejs PO POLSKU. Waluta PLN, kwoty w groszach (Int), formaty polskie.
   kampanii ze WSZYSTKICH kont reklamowych portfolio (`/me/adaccounts` →
   `/{act}/insights`). Klient: `lib/meta-ads.ts` (`isMetaConfigured`, `isMetaMock`,
   `fetchAdAccounts`, `fetchCampaignInsights`; tryb mock gdy brak `META_ACCESS_TOKEN`
-  lub `META_MOCK=1` — deterministyczne dane, bez sieci). Agregacja czysta:
-  `lib/meta-sync.ts` (`aggregateMetaToCampaignMonths` — sumuje kampanie per
-  marka×wertykal wg mapowania; niezmapowane → pula „nieprzypisane", ignorowane →
-  pomijane). Rdzeń zapisu: `lib/meta-sync-run.ts` (`runMetaSync(month)` — upsert
-  `MetaCampaignMap`, wpis `LeadCampaignMonth` z `source="META"` bez nadpisywania
-  `source="MANUAL"`, log `MetaSyncRun`; bez auth). Wołany przez: akcję
-  `syncMetaCampaignsAction` (przycisk „Zaciągnij z Mety", `requireAdmin`) oraz cron
-  `POST /api/cron/meta-sync` (nagłówek `x-cron-secret == CRON_SECRET`, działa tylko
-  gdy ustawienie `meta_autosync_enabled="1"`). Mapowanie kampania→marka+wertykal:
-  ręczne w UI (`meta-mapping-dialog.tsx`, autosave). **Zmienne środowiskowe**
+  lub `META_MOCK=1` — deterministyczne dane, bez sieci). **Mapowanie dwupoziomowe**:
+  `MetaAdAccountMap` — KONTO → marka wewnętrzna albo `ignored` (konto klienta
+  abonamentowego, pomijane w całości); `MetaCampaignMap` — kampania → wertykal
+  (marka dziedziczona z konta, `brandId` per kampania = opcjonalny override).
+  Agregacja czysta: `lib/meta-sync.ts` (`aggregateMetaToCampaignMonths(insights,
+  campaignMaps, accountMaps)` — sumuje per marka×wertykal; konta/kampanie ignored
+  pomijane bez liczenia; brak marki lub wertykalu → pula „nieprzypisane"). Rdzeń
+  zapisu: `lib/meta-sync-run.ts` (`runMetaSync(month)` — upsert map kont i kampanii,
+  wpis `LeadCampaignMonth` z `source="META"` bez nadpisywania `source="MANUAL"`,
+  log `MetaSyncRun`; bez auth). Wołany przez: akcję `syncMetaCampaignsAction`
+  (przycisk „Zaciągnij z Mety", `requireAdmin`) oraz cron `POST /api/cron/meta-sync`
+  (nagłówek `x-cron-secret == CRON_SECRET`, działa tylko gdy ustawienie
+  `meta_autosync_enabled="1"`). UI przypisywania: `meta-mapping-dialog.tsx` —
+  2 kroki (Konta → Kampanie), autosave optymistyczny, podpowiedź wertykalu z nazwy
+  kampanii.
+- **Ekonomika marek + budżety (moduł Leady)**: `BrandBudget` (period × brandId →
+  budgetGr, plan miesiąca „żeby się spięło"). Silnik czysty `lib/brand-econ.ts`
+  (`buildBrandEconomics` — leady/spend/CPL per marka, przychód z dostaw wg cen
+  jednostkowych z faktur: klient×wertykal → fallback wertykal, leady bez ceny do
+  `unpricedLeads`; marża = przychód − spend; budżet plan vs wydane; oraz
+  `daysLeftInMonth`). Raporty: `getBrandEconomics(month)` (karty marek) i
+  `getAdBudgetStatus(month)` (plan Σ marek vs wydane wg Mety vs zaksięgowane +
+  tempo dzienne) — wspólna karta `components/ad-budget-summary.tsx` renderowana
+  w `/leady` (variant card) i na górze `/finanse/koszty` (variant banner, bieżący
+  miesiąc). Layout `/leady`: pasek Meta → karty marek → dostawy + cash-flow →
+  `<details>` ze szczegółami (kampanie per wertykal, uzgodnienie). **Zmienne środowiskowe**
   (prod `.env`, nie w repo): `META_ACCESS_TOKEN` (System User token z `ads_read` +
   `business_management`), `META_API_VERSION` (dom. `v21.0`),
   `META_AD_ACCOUNT_ALLOWLIST` (opcjonalna, CSV `act_...`),

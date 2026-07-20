@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { generateRecurringCosts } from "@/lib/reports";
+import { generateRecurringCosts, getAdBudgetStatus } from "@/lib/reports";
+import { monthKey } from "@/lib/periods";
+import { todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
+import { AdBudgetSummary } from "@/components/ad-budget-summary";
 import { buildCostFilters, type CostFilterParams } from "./filters";
 import { CostsTable, type CostRow } from "./costs-table";
 import { PendingCosts, type PendingCostRow } from "./pending-costs";
@@ -36,6 +39,9 @@ export default async function CostsPage({
     platnosc: first(raw.platnosc),
   };
   const { where } = buildCostFilters(filters);
+
+  // budżet reklamowy bieżącego miesiąca (plan marek vs wydane wg Mety) — banner
+  const adBudget = await getAdBudgetStatus(monthKey(todayUTC()));
 
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
@@ -120,6 +126,9 @@ export default async function CostsPage({
         description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
       />
       <div className="space-y-4">
+        {(adBudget.planGr > 0 || adBudget.spentGr > 0) && (
+          <AdBudgetSummary status={adBudget} variant="banner" />
+        )}
         {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
         <CostsTable
           costs={rows}

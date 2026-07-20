@@ -47,6 +47,53 @@ export async function syncMetaCampaignsAction(
   }
 }
 
+// ── Mapowanie kont reklamowych (konto → marka wewnętrzna albo „konto klienta") ──
+
+const accountMappingSchema = z.object({
+  adAccountId: z.string().min(1),
+  brandId: z.string().optional(),
+  ignored: z.boolean().optional(),
+});
+
+/** Przypisuje konto reklamowe do marki wewnętrznej lub oznacza jako klienckie (pomijane). */
+export async function setAccountMappingAction(input: {
+  adAccountId: string;
+  brandId?: string;
+  ignored?: boolean;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = accountMappingSchema.safeParse(input);
+  if (!parsed.success) return fail("Nieprawidłowe dane konta");
+  const d = parsed.data;
+
+  const ignored = d.ignored ?? false;
+  const brandId = ignored ? null : d.brandId || null;
+  if (brandId) {
+    const brand = await db.brand.findUnique({ where: { id: brandId } });
+    if (!brand) return fail("Wybrana marka nie istnieje");
+  }
+
+  // konto mogło być widziane tylko w kampaniach (sprzed mapy kont) → upsert z nazwą
+  const fromCampaign = await db.metaCampaignMap.findFirst({
+    where: { adAccountId: d.adAccountId },
+    select: { adAccountName: true },
+  });
+  await db.metaAdAccountMap.upsert({
+    where: { adAccountId: d.adAccountId },
+    update: { brandId, ignored },
+    create: {
+      adAccountId: d.adAccountId,
+      adAccountName: fromCampaign?.adAccountName ?? d.adAccountId,
+      brandId,
+      ignored,
+    },
+  });
+  revalidateAll();
+  return ok(
+    ignored ? "Konto oznaczone jako klienckie (pomijane)" : "Konto przypisane do marki"
+  );
+}
+
 const mappingSchema = z.object({
   metaCampaignId: z.string().min(1),
   brandId: z.string().optional(),

@@ -308,3 +308,43 @@ export async function deleteVerticalAction(id: string): Promise<ActionResult> {
   revalidateVerticals();
   return ok("Wertykal usunięty");
 }
+
+// ── Budżet reklamowy marki (plan miesiąca — „żeby się spięło") ───────
+
+const budgetSchema = z.object({
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Nieprawidłowy miesiąc"),
+  brandId: z.string().min(1),
+  budget: z.string().trim(),
+});
+
+/** Zapisuje miesięczny plan budżetu marki (puste pole = usuń plan). */
+export async function saveBrandBudgetAction(input: {
+  period: string;
+  brandId: string;
+  budget: string;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = budgetSchema.safeParse(input);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Nieprawidłowe dane");
+  const d = parsed.data;
+
+  const brand = await db.brand.findUnique({ where: { id: d.brandId } });
+  if (!brand) return fail("Marka nie istnieje");
+
+  if (d.budget === "") {
+    await db.brandBudget.deleteMany({ where: { period: d.period, brandId: d.brandId } });
+    revalidateAll();
+    return ok("Plan budżetu usunięty");
+  }
+
+  const budgetGr = parseMoneyToGr(d.budget);
+  if (budgetGr === null || budgetGr < 0) return fail("Nieprawidłowa kwota budżetu");
+
+  await db.brandBudget.upsert({
+    where: { period_brandId: { period: d.period, brandId: d.brandId } },
+    update: { budgetGr },
+    create: { period: d.period, brandId: d.brandId, budgetGr },
+  });
+  revalidateAll();
+  return ok("Plan budżetu zapisany");
+}

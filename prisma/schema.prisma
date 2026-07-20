@@ -330,6 +330,31 @@ model LeadCampaignMonth {
 // Mapowanie kampanii Meta → marka + wertykal (wspólne/wiele kont reklamowych).
 // Kampanie zaciągane z całego portfolio; brandId/vertical null = niezmapowana;
 // ignored = pomijana (np. nie-leadowa). Klucz: metaCampaignId (globalnie unikalny).
+// Mapowanie KONTA reklamowego Meta → marka wewnętrzna (albo „konto klienta" =
+// ignored, pomijane w całości). Kampanie dziedziczą markę z konta — w dialogu
+// przypisuje się im już tylko wertykal.
+model MetaAdAccountMap {
+  id            String   @id @default(cuid())
+  adAccountId   String   @unique
+  adAccountName String
+  brandId       String?
+  ignored       Boolean  @default(false)
+  lastSeenAt    DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Miesięczny plan budżetu reklamowego per marka wewnętrzna („żeby się spięło"):
+// karta marki pokazuje wydane wg Mety vs plan i ile zostało do wydania.
+model BrandBudget {
+  id       String @id @default(cuid())
+  period   String // "RRRR-MM"
+  brandId  String
+  budgetGr Int // plan NETTO w groszach
+
+  @@unique([period, brandId])
+  @@index([period])
+}
+
 model MetaCampaignMap {
   id               String   @id @default(cuid())
   metaCampaignId   String   @unique

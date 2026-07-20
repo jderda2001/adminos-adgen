@@ -3,14 +3,26 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateMetaToCampaignMonths,
+  type AccountMappingLike,
   type CampaignMappingLike,
   type MetaInsightLike,
 } from "@/lib/meta-sync";
 
-const ins = (campaignId: string, spendGr: number, leadsCount: number): MetaInsightLike => ({
+const ins = (
+  campaignId: string,
+  spendGr: number,
+  leadsCount: number,
+  adAccountId?: string
+): MetaInsightLike => ({
   campaignId,
+  adAccountId,
   spendGr,
   leadsCount,
+});
+const acc = (adAccountId: string, brandId: string | null, ignored = false): AccountMappingLike => ({
+  adAccountId,
+  brandId,
+  ignored,
 });
 const map = (
   metaCampaignId: string,
@@ -66,5 +78,45 @@ describe("aggregateMetaToCampaignMonths", () => {
     expect(r.rows).toEqual([]);
     expect(r.mappedCampaignCount).toBe(0);
     expect(r.unmappedSpendGr).toBe(0);
+  });
+
+  it("marka dziedziczona z konta — kampania potrzebuje tylko wertykalu", () => {
+    const insights = [ins("c1", 100_000, 10, "act_1")];
+    const mappings = [map("c1", null, "SKD")];
+    const r = aggregateMetaToCampaignMonths(insights, mappings, [acc("act_1", "brandA")]);
+    expect(r.rows).toEqual([{ brandId: "brandA", vertical: "SKD", spendGr: 100_000, leadsCount: 10 }]);
+    expect(r.unmappedSpendGr).toBe(0);
+  });
+
+  it("override marki per kampania wygrywa z marką konta", () => {
+    const insights = [ins("c1", 100_000, 10, "act_1")];
+    const mappings = [map("c1", "brandB", "OZE")];
+    const r = aggregateMetaToCampaignMonths(insights, mappings, [acc("act_1", "brandA")]);
+    expect(r.rows[0].brandId).toBe("brandB");
+  });
+
+  it("konto klienckie (ignored) → kampanie pomijane w całości, nie „niezmapowane”", () => {
+    const insights = [ins("c1", 500_000, 50, "act_klient"), ins("c2", 100_000, 10, "act_1")];
+    const mappings = [map("c2", null, "SKD")];
+    const accounts = [acc("act_klient", null, true), acc("act_1", "brandA")];
+    const r = aggregateMetaToCampaignMonths(insights, mappings, accounts);
+    expect(r.rows).toHaveLength(1);
+    expect(r.unmappedSpendGr).toBe(0);
+    expect(r.unmappedCampaignIds).toEqual([]);
+  });
+
+  it("konto z marką, kampania bez wertykalu → niezmapowana", () => {
+    const insights = [ins("c1", 100_000, 10, "act_1")];
+    const r = aggregateMetaToCampaignMonths(insights, [], [acc("act_1", "brandA")]);
+    expect(r.rows).toEqual([]);
+    expect(r.unmappedSpendGr).toBe(100_000);
+    expect(r.unmappedCampaignIds).toEqual(["c1"]);
+  });
+
+  it("konto bez przypisania → kampanie niezmapowane (czekają na decyzję)", () => {
+    const insights = [ins("c1", 100_000, 10, "act_nowe")];
+    const r = aggregateMetaToCampaignMonths(insights, [map("c1", null, "SKD")], []);
+    expect(r.rows).toEqual([]);
+    expect(r.unmappedSpendGr).toBe(100_000);
   });
 });

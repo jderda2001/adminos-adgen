@@ -5,7 +5,7 @@
 // Zawsze loguje MetaSyncRun (ok=true / ok=false + błąd).
 
 import { db } from "./db";
-import { fetchCampaignInsights, isMetaMock } from "./meta-ads";
+import { fetchAdAccounts, fetchCampaignInsights, isMetaMock } from "./meta-ads";
 import { aggregateMetaToCampaignMonths } from "./meta-sync";
 
 export interface MetaSyncSummary {
@@ -23,6 +23,16 @@ export interface MetaSyncSummary {
  */
 export async function runMetaSync(month: string): Promise<MetaSyncSummary> {
   try {
+    // aktualizuj mapę KONT reklamowych (nowe = do decyzji: marka czy pomiń)
+    const adAccounts = await fetchAdAccounts();
+    for (const a of adAccounts) {
+      await db.metaAdAccountMap.upsert({
+        where: { adAccountId: a.id },
+        update: { adAccountName: a.name, lastSeenAt: new Date() },
+        create: { adAccountId: a.id, adAccountName: a.name },
+      });
+    }
+
     const insights = await fetchCampaignInsights(month);
 
     // aktualizuj mapę kampanii (nowe = niezmapowane, widoczne w dialogu)
@@ -44,11 +54,16 @@ export async function runMetaSync(month: string): Promise<MetaSyncSummary> {
       });
     }
 
-    const maps = await db.metaCampaignMap.findMany({
-      where: { metaCampaignId: { in: insights.map((c) => c.campaignId) } },
-      select: { metaCampaignId: true, brandId: true, vertical: true, ignored: true },
-    });
-    const agg = aggregateMetaToCampaignMonths(insights, maps);
+    const [maps, accountMaps] = await Promise.all([
+      db.metaCampaignMap.findMany({
+        where: { metaCampaignId: { in: insights.map((c) => c.campaignId) } },
+        select: { metaCampaignId: true, brandId: true, vertical: true, ignored: true },
+      }),
+      db.metaAdAccountMap.findMany({
+        select: { adAccountId: true, brandId: true, ignored: true },
+      }),
+    ]);
+    const agg = aggregateMetaToCampaignMonths(insights, maps, accountMaps);
 
     // upsert zagregowanych spendów do LeadCampaignMonth (bez nadpisywania MANUAL)
     let monthsUpserted = 0;

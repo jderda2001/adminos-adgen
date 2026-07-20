@@ -33,6 +33,7 @@ import { computeVatFromNet } from "./calc";
 import { RW_CATEGORIES } from "./rw-types";
 import type { LeadForecastData } from "./lead-forecast";
 import { isMetaConfigured, isMetaMock } from "./meta-ads";
+import { buildBrandEconomics, daysLeftInMonth, type BrandEconRow } from "./brand-econ";
 import { DEFAULT_VERTICALS, isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
@@ -833,18 +834,30 @@ export interface MetaStatus {
     unmappedSpendGr: number;
     error: string | null;
   } | null;
-  unmappedCount: number; // kampanie bez marki/wertykalu i nieoznaczone „ignoruj"
+  accountsPending: number; // konta bez decyzji (marka vs konto klienta)
+  campaignsPending: number; // kampanie z kont z marką, bez wertykalu
+  pendingTotal: number; // do badge'a „Przypisz"
 }
 
 export async function getMetaStatus(): Promise<MetaStatus> {
-  const [last, unmappedCount, configured, mock] = await Promise.all([
+  const [last, accounts, campaigns, configured, mock] = await Promise.all([
     db.metaSyncRun.findFirst({ orderBy: { ranAt: "desc" } }),
-    db.metaCampaignMap.count({
-      where: { ignored: false, OR: [{ brandId: null }, { vertical: null }] },
+    db.metaAdAccountMap.findMany({ select: { adAccountId: true, brandId: true, ignored: true } }),
+    db.metaCampaignMap.findMany({
+      where: { ignored: false },
+      select: { adAccountId: true, brandId: true, vertical: true },
     }),
     isMetaConfigured(),
     isMetaMock(),
   ]);
+  const accById = new Map(accounts.map((a) => [a.adAccountId, a]));
+  const accountsPending = accounts.filter((a) => !a.ignored && !a.brandId).length;
+  const campaignsPending = campaigns.filter((c) => {
+    const acc = accById.get(c.adAccountId);
+    if (acc?.ignored) return false;
+    const brand = c.brandId ?? acc?.brandId ?? null;
+    return Boolean(brand) && !c.vertical;
+  }).length;
   return {
     configured,
     mock,
@@ -859,8 +872,18 @@ export async function getMetaStatus(): Promise<MetaStatus> {
           error: last.error,
         }
       : null,
-    unmappedCount,
+    accountsPending,
+    campaignsPending,
+    pendingTotal: accountsPending + campaignsPending,
   };
+}
+
+export interface MetaAccountRow {
+  adAccountId: string;
+  adAccountName: string;
+  brandId: string | null;
+  ignored: boolean;
+  campaignCount: number;
 }
 
 export interface MetaCampaignMapRow {
@@ -869,16 +892,54 @@ export interface MetaCampaignMapRow {
   metaCampaignName: string;
   adAccountId: string;
   adAccountName: string;
-  brandId: string | null;
+  brandId: string | null; // override per kampania (zwykle null — marka z konta)
   vertical: string | null;
   ignored: boolean;
 }
 
-/** Kampanie Meta do mapowania (dialog) — posortowane: niezmapowane najpierw. */
-export async function getMetaCampaignsForMapping(): Promise<MetaCampaignMapRow[]> {
-  const rows = await db.metaCampaignMap.findMany({ orderBy: [{ adAccountName: "asc" }, { metaCampaignName: "asc" }] });
-  return rows
-    .map((r) => ({
+export interface MetaMappingData {
+  accounts: MetaAccountRow[];
+  campaigns: MetaCampaignMapRow[];
+}
+
+/** Konta + kampanie Meta do dialogu przypisywania (krok 1: konta, krok 2: kampanie). */
+export async function getMetaMappingData(): Promise<MetaMappingData> {
+  const [accountRows, campaignRows] = await Promise.all([
+    db.metaAdAccountMap.findMany({ orderBy: { adAccountName: "asc" } }),
+    db.metaCampaignMap.findMany({
+      orderBy: [{ adAccountName: "asc" }, { metaCampaignName: "asc" }],
+    }),
+  ]);
+  const countByAccount = new Map<string, number>();
+  for (const c of campaignRows) {
+    countByAccount.set(c.adAccountId, (countByAccount.get(c.adAccountId) ?? 0) + 1);
+  }
+  // konta widziane tylko w kampaniach (sprzed wprowadzenia mapy kont) też pokazujemy
+  const known = new Set(accountRows.map((a) => a.adAccountId));
+  const extra = new Map<string, string>();
+  for (const c of campaignRows) {
+    if (!known.has(c.adAccountId)) extra.set(c.adAccountId, c.adAccountName);
+  }
+  const accounts: MetaAccountRow[] = [
+    ...accountRows.map((a) => ({
+      adAccountId: a.adAccountId,
+      adAccountName: a.adAccountName,
+      brandId: a.brandId,
+      ignored: a.ignored,
+      campaignCount: countByAccount.get(a.adAccountId) ?? 0,
+    })),
+    ...[...extra.entries()].map(([id, name]) => ({
+      adAccountId: id,
+      adAccountName: name,
+      brandId: null,
+      ignored: false,
+      campaignCount: countByAccount.get(id) ?? 0,
+    })),
+  ].sort((a, b) => a.adAccountName.localeCompare(b.adAccountName, "pl"));
+
+  return {
+    accounts,
+    campaigns: campaignRows.map((r) => ({
       id: r.id,
       metaCampaignId: r.metaCampaignId,
       metaCampaignName: r.metaCampaignName,
@@ -887,12 +948,118 @@ export async function getMetaCampaignsForMapping(): Promise<MetaCampaignMapRow[]
       brandId: r.brandId,
       vertical: r.vertical,
       ignored: r.ignored,
-    }))
-    .sort((a, b) => {
-      const au = !a.ignored && (!a.brandId || !a.vertical) ? 0 : 1;
-      const bu = !b.ignored && (!b.brandId || !b.vertical) ? 0 : 1;
-      return au - bu;
-    });
+    })),
+  };
+}
+
+// ── Ekonomika marek wewnętrznych + budżet reklamowy miesiąca ────────
+
+export interface BrandEconomics {
+  rows: BrandEconRow[];
+  daysLeft: number; // dni do końca miesiąca (łącznie z dziś); 0 dla przeszłych
+}
+
+/**
+ * Karty marek: leady/spend/CPL z LeadCampaignMonth, przychód z dostaw wyceniony
+ * cenami jednostkowymi z faktur (klient×wertykal → fallback wertykal), marża
+ * i budżet plan vs wydane (BrandBudget).
+ */
+export async function getBrandEconomics(month: string): Promise<BrandEconomics> {
+  const [brands, campaigns, deliveries, budgets, accounts, pricedInvoices] = await Promise.all([
+    db.brand.findMany({
+      where: { active: true },
+      orderBy: { position: "asc" },
+      select: { id: true, name: true },
+    }),
+    db.leadCampaignMonth.findMany({
+      where: { period: month },
+      select: { brandId: true, spendGr: true, leadsCount: true },
+    }),
+    db.leadDelivery.findMany({
+      where: { period: month },
+      select: { brandId: true, clientId: true, vertical: true, leadsCount: true },
+    }),
+    db.brandBudget.findMany({ where: { period: month } }),
+    db.metaAdAccountMap.findMany({
+      select: { brandId: true, adAccountName: true, ignored: true },
+    }),
+    db.invoice.findMany({
+      where: {
+        ...REVENUE_WHERE,
+        leadUnitPriceGr: { not: null },
+        offerTags: { contains: LEAD_TAG_PREFIX },
+        saleDate: { gte: new Date(Date.now() - 365 * 86_400_000) },
+      },
+      orderBy: { saleDate: "desc" },
+      select: { clientId: true, leadUnitPriceGr: true, offerTags: true },
+    }),
+  ]);
+
+  const unitPriceByClientVertical = new Map<string, number>();
+  const unitPriceByVertical: Record<string, number> = {};
+  for (const inv of pricedInvoices) {
+    const v = verticalFromOfferTags(inv.offerTags);
+    if (!v || inv.leadUnitPriceGr == null) continue;
+    if (inv.clientId) {
+      const key = `${inv.clientId}|${v}`;
+      if (!unitPriceByClientVertical.has(key))
+        unitPriceByClientVertical.set(key, inv.leadUnitPriceGr);
+    }
+    if (unitPriceByVertical[v] === undefined) unitPriceByVertical[v] = inv.leadUnitPriceGr;
+  }
+
+  const rows = buildBrandEconomics({
+    brands,
+    campaigns,
+    deliveries,
+    unitPriceByClientVertical,
+    unitPriceByVertical,
+    budgets: new Map(budgets.map((b) => [b.brandId, b.budgetGr])),
+    accounts,
+  });
+
+  return { rows, daysLeft: daysLeftInMonth(month, todayUTC()) };
+}
+
+export interface AdBudgetStatus {
+  month: string;
+  planGr: number; // Σ budżetów marek
+  spentGr: number; // Σ spend kampanii (Meta + ręczne)
+  bookedGr: number; // zaksięgowane koszty w kategoriach budżetu reklamowego
+  remainingGr: number; // plan − wydane (ujemne = przepał)
+  daysLeft: number;
+  dailyPaceGr: number | null; // ile dziennie, by domknąć plan (null gdy nie dotyczy)
+}
+
+/** Status budżetu reklamowego miesiąca — karta w Leady i banner w Kosztach. */
+export async function getAdBudgetStatus(month: string): Promise<AdBudgetStatus> {
+  const bounds = monthBounds(month);
+  const [budgetAgg, spendAgg, adBudgetCategoryIds] = await Promise.all([
+    db.brandBudget.aggregate({ where: { period: month }, _sum: { budgetGr: true } }),
+    db.leadCampaignMonth.aggregate({ where: { period: month }, _sum: { spendGr: true } }),
+    getAdBudgetCategoryIds(),
+  ]);
+  const bookedAgg = await db.cost.aggregate({
+    where: {
+      ...COST_WHERE,
+      categoryId: { in: [...adBudgetCategoryIds] },
+      docDate: { gte: bounds.from, lt: bounds.to },
+    },
+    _sum: { netGr: true },
+  });
+  const planGr = budgetAgg._sum.budgetGr ?? 0;
+  const spentGr = spendAgg._sum.spendGr ?? 0;
+  const remainingGr = planGr - spentGr;
+  const daysLeft = daysLeftInMonth(month, todayUTC());
+  return {
+    month,
+    planGr,
+    spentGr,
+    bookedGr: bookedAgg._sum.netGr ?? 0,
+    remainingGr,
+    daysLeft,
+    dailyPaceGr: daysLeft > 0 && remainingGr > 0 ? Math.round(remainingGr / daysLeft) : null,
+  };
 }
 
 // ── Dane wejściowe do prognozy leadów (moduł Estymacje) ─────────────
