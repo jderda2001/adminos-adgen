@@ -77,6 +77,7 @@ export function InvoiceFormDialog({
   const [leadsQty, setLeadsQty] = useState("");
   const [leadUnitPrice, setLeadUnitPrice] = useState("");
   const [leadActivationFee, setLeadActivationFee] = useState("");
+  const [leadGuaranteePct, setLeadGuaranteePct] = useState("");
 
   const today = todayUTC();
   const defaultSaleDate = invoice
@@ -97,6 +98,9 @@ export function InvoiceFormDialog({
     );
     setLeadActivationFee(
       invoice?.leadActivationFeeGr != null ? formatAmount(invoice.leadActivationFeeGr) : ""
+    );
+    setLeadGuaranteePct(
+      invoice?.leadGuaranteePct != null ? String(invoice.leadGuaranteePct) : ""
     );
   }
 
@@ -162,6 +166,19 @@ export function InvoiceFormDialog({
   const leadsMode = hasLeads && leadsNetGr !== null;
   const effectiveNet = leadsMode ? formatAmount(leadsNetGr!) : net;
 
+  // % gwarancji: leady gratis PONAD zapłacone — podgląd „do dowiezienia"
+  // (kontrakt), bez wpływu na kwotę faktury. Zaokrąglenie w górę jak w silniku.
+  const guaranteePctInt =
+    leadGuaranteePct.trim() === ""
+      ? 0
+      : Number(leadGuaranteePct.replace("%", "").replace(/\s/g, ""));
+  const guaranteeValid =
+    Number.isInteger(guaranteePctInt) && guaranteePctInt >= 0 && guaranteePctInt <= 100;
+  const contractQty =
+    qtyInt !== null && Number.isInteger(qtyInt) && qtyInt >= 1 && guaranteeValid && guaranteePctInt > 0
+      ? qtyInt + Math.ceil((qtyInt * guaranteePctInt) / 100)
+      : null;
+
   // Podgląd VAT/brutto na żywo (serwer liczy ostatecznie przez computeVatFromNet)
   const netGr = parseMoneyToGr(effectiveNet);
   const preview =
@@ -188,6 +205,7 @@ export function InvoiceFormDialog({
       leadsQty: hasLeads ? leadsQty : "",
       leadUnitPrice: hasLeads ? leadUnitPrice : "",
       leadActivationFee: hasLeads ? leadActivationFee : "",
+      leadGuaranteePct: hasLeads ? leadGuaranteePct : "",
       status: String(formData.get("status") ?? "ISSUED"),
     };
     startTransition(async () => {
@@ -434,19 +452,41 @@ export function InvoiceFormDialog({
                     />
                   </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="leadActivationFee">Opłata aktywacyjna (netto, zł)</Label>
-                  <Input
-                    id="leadActivationFee"
-                    inputMode="decimal"
-                    value={leadActivationFee}
-                    onChange={(e) => setLeadActivationFee(e.target.value)}
-                    placeholder="np. 500 lub 1500 — opcjonalnie"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Dolicza się do kwoty netto faktury (leady × cena + opłata).
-                  </p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="leadActivationFee">Opłata aktywacyjna (netto, zł)</Label>
+                    <Input
+                      id="leadActivationFee"
+                      inputMode="decimal"
+                      value={leadActivationFee}
+                      onChange={(e) => setLeadActivationFee(e.target.value)}
+                      placeholder="np. 500 — opcjonalnie"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="leadGuaranteePct">Gwarancja (%)</Label>
+                    <Input
+                      id="leadGuaranteePct"
+                      inputMode="numeric"
+                      value={leadGuaranteePct}
+                      onChange={(e) => setLeadGuaranteePct(e.target.value)}
+                      placeholder="np. 10 lub 20"
+                    />
+                  </div>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Opłata dolicza się do netto faktury (leady × cena + opłata). Gwarancja
+                  dorzuca leady do dowiezienia — bez wpływu na cenę.
+                  {contractQty !== null && (
+                    <>
+                      {" "}
+                      <span className="font-medium text-foreground">
+                        Do dowiezienia: {contractQty} leadów
+                      </span>{" "}
+                      ({qtyInt} + {guaranteePctInt}% gwarancji).
+                    </>
+                  )}
+                </p>
                 <div className="space-y-1.5">
                   <Label htmlFor="leadCategory">Leady na</Label>
                   <Select value={leadCategory} onValueChange={setLeadCategory}>

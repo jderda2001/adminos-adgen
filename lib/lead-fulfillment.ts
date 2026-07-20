@@ -37,6 +37,17 @@ export interface ClientVerticalStatus {
 const keyOf = (clientId: string, vertical: string) => `${clientId}|${vertical}`;
 
 /**
+ * Liczba leadów do dowiezienia z uwzględnieniem % gwarancji: gwarancja dorzuca
+ * leady PONAD zapłacone (50 szt. + 10% → 55), bez wpływu na kwotę faktury.
+ * Ułamki zaokrąglamy W GÓRĘ (gwarancja to obietnica — 25 + 10% → 28), na
+ * liczbach całkowitych (bez artefaktów float).
+ */
+export function qtyWithGuarantee(qty: number, guaranteePct: number | null | undefined): number {
+  if (!guaranteePct || guaranteePct <= 0) return qty;
+  return qty + Math.ceil((qty * guaranteePct) / 100);
+}
+
+/**
  * Status realizacji per klient × wertykal dla danego miesiąca, z uwzględnieniem
  * przeniesionego długu. Bierze pod uwagę wszystkie faktury i dostawy (również
  * z wcześniejszych miesięcy) — miesiące > `month` są ignorowane.

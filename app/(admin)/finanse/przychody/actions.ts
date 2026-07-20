@@ -27,6 +27,7 @@ export interface InvoiceFormInput {
   leadsQty?: string;
   leadUnitPrice?: string; // cena za lead NETTO w zł
   leadActivationFee?: string; // opłata aktywacyjna NETTO w zł (opcjonalna, dolicza się)
+  leadGuaranteePct?: string; // % gwarancji — leady gratis PONAD zapłacone (bez wpływu na cenę)
   /** tylko przy tworzeniu: DRAFT | ISSUED | PAID */
   status?: string;
 }
@@ -44,6 +45,7 @@ const invoiceSchema = z.object({
   leadsQty: z.string().trim().optional().default(""),
   leadUnitPrice: z.string().trim().optional().default(""),
   leadActivationFee: z.string().trim().optional().default(""),
+  leadGuaranteePct: z.string().trim().optional().default(""),
   status: z
     .enum(["DRAFT", "NOT_ISSUED", "WAITING", "ISSUED", "NO_INVOICE", "PAID"], {
       message: "Wybierz status",
@@ -66,6 +68,7 @@ interface ParsedInvoice {
   leadsQty: number | null;
   leadUnitPriceGr: number | null;
   leadActivationFeeGr: number | null;
+  leadGuaranteePct: number | null;
   status?: "DRAFT" | "NOT_ISSUED" | "WAITING" | "ISSUED" | "NO_INVOICE" | "PAID";
 }
 
@@ -101,6 +104,7 @@ function parseInvoiceInput(
   let leadsQty: number | null = null;
   let leadUnitPriceGr: number | null = null;
   let leadActivationFeeGr: number | null = null;
+  let leadGuaranteePct: number | null = null;
   let netGr: number | null = null;
 
   const qtyRaw = (d.leadsQty ?? "").trim();
@@ -122,6 +126,18 @@ function parseInvoiceInput(
         return { success: false, error: "Podaj poprawną opłatę aktywacyjną, np. 1500,00" };
       }
       leadActivationFeeGr = feeGr;
+    }
+    // % gwarancji (opcjonalny) — dorzuca leady do KONTRAKTU, nie do ceny
+    const pctRaw = (d.leadGuaranteePct ?? "").trim().replace("%", "");
+    if (pctRaw !== "") {
+      const pct = Number(pctRaw.replace(/\s/g, "").replace(",", "."));
+      if (!Number.isInteger(pct) || pct < 0 || pct > 100) {
+        return {
+          success: false,
+          error: "Gwarancja musi być liczbą całkowitą 0–100 (%), np. 10 lub 20",
+        };
+      }
+      leadGuaranteePct = pct > 0 ? pct : null;
     }
     leadsQty = qty;
     leadUnitPriceGr = priceGr;
@@ -166,6 +182,7 @@ function parseInvoiceInput(
       leadsQty,
       leadUnitPriceGr,
       leadActivationFeeGr,
+      leadGuaranteePct,
       status: d.status,
     },
   };
@@ -209,6 +226,7 @@ export async function createInvoiceAction(
       leadsQty: d.leadsQty,
       leadUnitPriceGr: d.leadUnitPriceGr,
       leadActivationFeeGr: d.leadActivationFeeGr,
+      leadGuaranteePct: d.leadGuaranteePct,
       offerTags: d.offerTags,
       notes: d.notes,
     },
@@ -266,6 +284,7 @@ export async function updateInvoiceAction(
         leadsQty: d.leadsQty,
         leadUnitPriceGr: d.leadUnitPriceGr,
         leadActivationFeeGr: d.leadActivationFeeGr,
+        leadGuaranteePct: d.leadGuaranteePct,
         offerTags: d.offerTags,
         notes: d.notes,
       },

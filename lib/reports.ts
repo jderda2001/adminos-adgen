@@ -37,6 +37,7 @@ import { buildBrandEconomics, daysLeftInMonth, type BrandEconRow } from "./brand
 import {
   buildDeliveryStatus,
   buildFulfillmentPlan,
+  qtyWithGuarantee,
   type ClientVerticalStatus,
   type FulfillmentPlan,
 } from "./lead-fulfillment";
@@ -1143,7 +1144,13 @@ async function computeFulfillment(month: string): Promise<{
         offerTags: { contains: LEAD_TAG_PREFIX },
         saleDate: { lt: monthEnd },
       },
-      select: { clientId: true, leadsQty: true, offerTags: true, saleDate: true },
+      select: {
+        clientId: true,
+        leadsQty: true,
+        leadGuaranteePct: true,
+        offerTags: true,
+        saleDate: true,
+      },
     }),
     db.leadDelivery.findMany({
       where: { period: { lte: month } },
@@ -1163,8 +1170,14 @@ async function computeFulfillment(month: string): Promise<{
     .map((inv) => {
       const v = verticalFromOfferTags(inv.offerTags);
       const period = monthKey(inv.saleDate);
+      // kontrakt = zapłacone leady + % gwarancji (dorzucane gratis, bez wpływu na cenę)
       return v && inv.leadsQty != null
-        ? { clientId: inv.clientId, vertical: v, period, leadsQty: inv.leadsQty }
+        ? {
+            clientId: inv.clientId,
+            vertical: v,
+            period,
+            leadsQty: qtyWithGuarantee(inv.leadsQty, inv.leadGuaranteePct),
+          }
         : null;
     })
     .filter((x): x is NonNullable<typeof x> => x !== null);

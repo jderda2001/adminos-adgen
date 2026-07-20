@@ -106,6 +106,9 @@ model Invoice {
   leadsQty       Int? // liczba sprzedanych leadów na fakturze
   leadUnitPriceGr Int? // cena jednostkowa leada NETTO w groszach
   leadActivationFeeGr Int? // opłata aktywacyjna NETTO (gr) — doliczana do netto paczki
+  // % gwarancji: leady dorzucane gratis PONAD zapłacone (50 szt. + 10% → kontrakt
+  // 55 do dowiezienia); NIE wpływa na kwotę faktury. null = brak gwarancji.
+  leadGuaranteePct Int?
   notes     String?
   createdAt DateTime  @default(now())
 

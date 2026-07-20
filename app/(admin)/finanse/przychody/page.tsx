@@ -98,6 +98,7 @@ export default async function RevenuesPage({
     leadsQty: inv.leadsQty,
     leadUnitPriceGr: inv.leadUnitPriceGr,
     leadActivationFeeGr: inv.leadActivationFeeGr,
+    leadGuaranteePct: inv.leadGuaranteePct,
   }));
 
   // KPI miesiąca — na kwotach netto (agregat finansowy liczony netto).

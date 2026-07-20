@@ -91,6 +91,7 @@ export interface InvoiceRow {
   leadsQty: number | null;
   leadUnitPriceGr: number | null;
   leadActivationFeeGr: number | null;
+  leadGuaranteePct: number | null;
 }
 
 export interface ClientOption {

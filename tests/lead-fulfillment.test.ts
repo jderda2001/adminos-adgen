@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeliveryStatus,
   buildFulfillmentPlan,
+  qtyWithGuarantee,
   type InvoiceLeadLine,
   type DeliveryLine,
 } from "@/lib/lead-fulfillment";
@@ -82,6 +83,30 @@ describe("buildDeliveryStatus", () => {
   it("puste pary (0 kontrakt, 0 dostawa, 0 bilans) pomijane", () => {
     const s = buildDeliveryStatus("2026-07", [inv("v", "SKD", "2026-06", 100)], [del("v", "SKD", "2026-06", 100)]);
     expect(s).toHaveLength(0); // rozliczone w czerwcu, w lipcu nic
+  });
+});
+
+describe("qtyWithGuarantee", () => {
+  it("gwarancja dorzuca leady ponad zapłacone (50 + 10% → 55)", () => {
+    expect(qtyWithGuarantee(50, 10)).toBe(55);
+    expect(qtyWithGuarantee(50, 20)).toBe(60);
+  });
+
+  it("ułamki zaokrągla w górę (gwarancja to obietnica)", () => {
+    expect(qtyWithGuarantee(25, 10)).toBe(28); // 2,5 → 3
+    expect(qtyWithGuarantee(33, 10)).toBe(37); // 3,3 → 4
+  });
+
+  it("liczy na liczbach całkowitych — bez artefaktów float", () => {
+    // 50 × 1.1 = 55.000000000000007 → naiwny ceil dałby 56
+    expect(qtyWithGuarantee(50, 10)).toBe(55);
+    expect(qtyWithGuarantee(300, 10)).toBe(330);
+  });
+
+  it("brak/zerowa/ujemna gwarancja = bez zmian", () => {
+    expect(qtyWithGuarantee(50, null)).toBe(50);
+    expect(qtyWithGuarantee(50, undefined)).toBe(50);
+    expect(qtyWithGuarantee(50, 0)).toBe(50);
   });
 });
 
