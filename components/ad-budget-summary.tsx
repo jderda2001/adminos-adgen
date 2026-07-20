@@ -36,7 +36,7 @@ export function AdBudgetSummary({
       )}
     >
       <div className={variant === "card" ? "flex items-baseline justify-between" : ""}>
-        <div className="text-xs text-muted-foreground">plan (suma marek)</div>
+        <div className="text-xs text-muted-foreground">plan (dowiezienie kontraktów)</div>
         <div className="font-medium">{hasPlan ? formatMoney(planGr) : "—"}</div>
       </div>
       <div className={variant === "card" ? "flex items-baseline justify-between" : ""}>

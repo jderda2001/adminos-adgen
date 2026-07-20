@@ -34,6 +34,12 @@ import { RW_CATEGORIES } from "./rw-types";
 import type { LeadForecastData } from "./lead-forecast";
 import { isMetaConfigured, isMetaMock } from "./meta-ads";
 import { buildBrandEconomics, daysLeftInMonth, type BrandEconRow } from "./brand-econ";
+import {
+  buildDeliveryStatus,
+  buildFulfillmentPlan,
+  type ClientVerticalStatus,
+  type FulfillmentPlan,
+} from "./lead-fulfillment";
 import { DEFAULT_VERTICALS, isVatRate, LEAD_TAG_PREFIX, type LeadCostSource } from "./types";
 import {
   buildLeadCosts,
@@ -1024,6 +1030,32 @@ export async function getBrandEconomics(month: string): Promise<BrandEconomics> 
     accounts,
   });
 
+  // min/max CPL z ostatnich 6 miesięcy per (marka × wertykal) — do sidebaru
+  const trailFrom = shiftMonth(month, -5);
+  const history = await db.leadCampaignMonth.findMany({
+    where: { period: { gte: trailFrom, lte: month } },
+    select: { brandId: true, vertical: true, spendGr: true, leadsCount: true },
+  });
+  const cplRange = new Map<string, { min: number; max: number }>();
+  for (const h of history) {
+    if (h.leadsCount <= 0) continue;
+    const cpl = Math.round(h.spendGr / h.leadsCount);
+    const key = `${h.brandId}|${h.vertical}`;
+    const r = cplRange.get(key);
+    if (!r) cplRange.set(key, { min: cpl, max: cpl });
+    else {
+      r.min = Math.min(r.min, cpl);
+      r.max = Math.max(r.max, cpl);
+    }
+  }
+  for (const row of rows) {
+    for (const v of row.verticals) {
+      const r = cplRange.get(`${row.brandId}|${v.vertical}`);
+      v.minCplGr = r ? r.min : null;
+      v.maxCplGr = r ? r.max : null;
+    }
+  }
+
   return { rows, daysLeft: daysLeftInMonth(month, todayUTC()) };
 }
 
@@ -1037,12 +1069,13 @@ export interface AdBudgetStatus {
   dailyPaceGr: number | null; // ile dziennie, by domknąć plan (null gdy nie dotyczy)
 }
 
-/** Status budżetu reklamowego miesiąca — karta w Leady i banner w Kosztach. */
+/** Status budżetu reklamowego miesiąca — karta w Leady i banner w Kosztach.
+ * Plan liczony AUTOMATYCZNIE z estymacji: ile trzeba wydać, by dowieźć
+ * zakontraktowane leady przy CPL z ostatniego okresu (nie z ręcznych budżetów). */
 export async function getAdBudgetStatus(month: string): Promise<AdBudgetStatus> {
   const bounds = monthBounds(month);
-  const [budgetAgg, spendAgg, adBudgetCategoryIds] = await Promise.all([
-    db.brandBudget.aggregate({ where: { period: month }, _sum: { budgetGr: true } }),
-    db.leadCampaignMonth.aggregate({ where: { period: month }, _sum: { spendGr: true } }),
+  const [f, adBudgetCategoryIds] = await Promise.all([
+    computeFulfillment(month),
     getAdBudgetCategoryIds(),
   ]);
   const bookedAgg = await db.cost.aggregate({
@@ -1053,10 +1086,10 @@ export async function getAdBudgetStatus(month: string): Promise<AdBudgetStatus> 
     },
     _sum: { netGr: true },
   });
-  const planGr = budgetAgg._sum.budgetGr ?? 0;
-  const spentGr = spendAgg._sum.spendGr ?? 0;
-  const remainingGr = planGr - spentGr;
-  const daysLeft = daysLeftInMonth(month, todayUTC());
+  const spentGr = f.spentTotalGr;
+  const remainingGr = f.plan.totalNeededSpendGr; // ile jeszcze wydać, by dowieźć
+  const planGr = spentGr + remainingGr; // pełny przewidywany wypływ miesiąca
+  const daysLeft = f.daysLeft;
   return {
     month,
     planGr,
@@ -1065,6 +1098,111 @@ export async function getAdBudgetStatus(month: string): Promise<AdBudgetStatus> 
     remainingGr,
     daysLeft,
     dailyPaceGr: daysLeft > 0 && remainingGr > 0 ? Math.round(remainingGr / daysLeft) : null,
+  };
+}
+
+// ── Realizacja kontraktów leadowych (kontrakt z Przychodów + estymacja) ──
+
+export interface LeadDeliveryStatusRow extends ClientVerticalStatus {
+  clientName: string;
+}
+export interface LeadFulfillment {
+  month: string;
+  statuses: LeadDeliveryStatusRow[]; // per klient × wertykal (kontrakt vs dowiezione + dług)
+  plan: FulfillmentPlan; // brakujące × CPL → needed spend + wzrost budżetu per wertykal
+  cplByVertical: Record<string, number | null>; // CPL z ostatniego okresu
+  spentTotalGr: number; // Σ wydane w Mecie w tym miesiącu
+  daysLeft: number;
+}
+
+/** Miesiąc "RRRR-MM" przesunięty o `delta` (może być ujemny). */
+function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+async function computeFulfillment(month: string): Promise<{
+  statuses: LeadDeliveryStatusRow[];
+  plan: FulfillmentPlan;
+  cplByVertical: Record<string, number | null>;
+  spentTotalGr: number;
+  daysLeft: number;
+}> {
+  const monthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1));
+  const prev = shiftMonth(month, -1);
+
+  const [leadInvoices, deliveries, trailingCampaigns, clients] = await Promise.all([
+    // faktury leadowe do końca wybranego miesiąca (kontrakt narastająco)
+    db.invoice.findMany({
+      where: {
+        ...REVENUE_WHERE,
+        leadsQty: { not: null },
+        offerTags: { contains: LEAD_TAG_PREFIX },
+        saleDate: { lt: monthEnd },
+      },
+      select: { clientId: true, leadsQty: true, offerTags: true, saleDate: true },
+    }),
+    db.leadDelivery.findMany({
+      where: { period: { lte: month } },
+      select: { clientId: true, vertical: true, leadsCount: true, period: true },
+    }),
+    // CPL „ostatniego okresu" ≈ bieżący + poprzedni miesiąc; spend tego miesiąca
+    db.leadCampaignMonth.findMany({
+      where: { period: { in: [prev, month] } },
+      select: { period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
+    db.client.findMany({ select: { id: true, name: true } }),
+  ]);
+
+  const clientName = new Map(clients.map((c) => [c.id, c.name]));
+
+  const invoiceLines = leadInvoices
+    .map((inv) => {
+      const v = verticalFromOfferTags(inv.offerTags);
+      const period = monthKey(inv.saleDate);
+      return v && inv.leadsQty != null
+        ? { clientId: inv.clientId, vertical: v, period, leadsQty: inv.leadsQty }
+        : null;
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
+
+  const statuses = buildDeliveryStatus(month, invoiceLines, deliveries).map((s) => ({
+    ...s,
+    clientName: clientName.get(s.clientId) ?? "?",
+  }));
+
+  // CPL trailing i spend bieżącego miesiąca per wertykal
+  const trail = new Map<string, { spendGr: number; leadsCount: number }>();
+  const spentByVertical: Record<string, number> = {};
+  let spentTotalGr = 0;
+  for (const c of trailingCampaigns) {
+    const t = trail.get(c.vertical) ?? { spendGr: 0, leadsCount: 0 };
+    t.spendGr += c.spendGr;
+    t.leadsCount += c.leadsCount;
+    trail.set(c.vertical, t);
+    if (c.period === month) {
+      spentByVertical[c.vertical] = (spentByVertical[c.vertical] ?? 0) + c.spendGr;
+      spentTotalGr += c.spendGr;
+    }
+  }
+  const cplByVertical: Record<string, number | null> = {};
+  for (const [v, t] of trail) cplByVertical[v] = t.leadsCount > 0 ? Math.round(t.spendGr / t.leadsCount) : null;
+
+  const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical);
+  return { statuses, plan, cplByVertical, spentTotalGr, daysLeft: daysLeftInMonth(month, todayUTC()) };
+}
+
+/** Pełna realizacja kontraktów leadowych do UI (dostawy + estymacja). */
+export async function getLeadFulfillment(month: string): Promise<LeadFulfillment> {
+  const f = await computeFulfillment(month);
+  return {
+    month,
+    statuses: f.statuses,
+    plan: f.plan,
+    cplByVertical: f.cplByVertical,
+    spentTotalGr: f.spentTotalGr,
+    daysLeft: f.daysLeft,
   };
 }
 

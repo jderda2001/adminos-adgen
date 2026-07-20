@@ -23,6 +23,8 @@ export interface BrandVerticalStat {
   leadsCount: number;
   spendGr: number;
   cplGr: number | null;
+  minCplGr?: number | null; // najniższy miesięczny CPL z ostatniego okresu (sidebar)
+  maxCplGr?: number | null; // najwyższy miesięczny CPL z ostatniego okresu (sidebar)
 }
 
 export interface BrandDeliveryLike {
