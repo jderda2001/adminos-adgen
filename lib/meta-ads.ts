@@ -19,7 +19,11 @@ import { getSetting } from "./settings";
 
 const GRAPH = "https://graph.facebook.com";
 
-const DEFAULT_LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped"];
+// UWAGA: Meta raportuje JEDNO zgłoszenie formularza pod wieloma nazwami akcji o
+// tej samej wartości (lead, onsite_conversion.lead_grouped, offsite_*_add_meta_leads).
+// Liczymy TYLKO „lead" (kanoniczna, obejmuje leady on- i offsite) — sumowanie
+// kilku typów podwajało wynik (np. 1156 zamiast 578).
+const DEFAULT_LEAD_ACTIONS = ["lead"];
 
 /**
  * Token dostępu Meta: najpierw z bazy (ustawiony przez OAuth „Połącz z FB" lub
@@ -223,10 +227,19 @@ function mockInsights(month: string): MetaCampaignInsight[] {
   });
 }
 
+/**
+ * Zakres dat do time_range Meta. Od 1. dnia miesiąca do OSTATNIEGO dnia — ale
+ * dla bieżącego miesiąca ucinamy do DZIŚ (MTD: nie zaciągamy „z przyszłości",
+ * pokazujemy stan na dzień synchronizacji). Miesiące przeszłe = pełny miesiąc.
+ */
 function monthBounds(month: string): { from: string; to: string } {
   const [y, m] = month.split("-").map(Number);
   const first = `${month}-01`;
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const last = `${month}-${String(lastDay).padStart(2, "0")}`;
-  return { from: first, to: last };
+  const now = new Date();
+  const todayStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+  // bieżący miesiąc → do dziś; przeszły → pełny; (przyszły nie jest synchronizowany)
+  const to = todayStr >= first && todayStr < last ? todayStr : last;
+  return { from: first, to };
 }
