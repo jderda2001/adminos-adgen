@@ -26,6 +26,7 @@ export interface InvoiceFormInput {
   /** paczki leadów (PAKIETY LEADÓW): liczba leadów × cena — wyliczają netto */
   leadsQty?: string;
   leadUnitPrice?: string; // cena za lead NETTO w zł
+  leadActivationFee?: string; // opłata aktywacyjna NETTO w zł (opcjonalna, dolicza się)
   /** tylko przy tworzeniu: DRAFT | ISSUED | PAID */
   status?: string;
 }
@@ -42,6 +43,7 @@ const invoiceSchema = z.object({
   notes: z.string().optional().default(""),
   leadsQty: z.string().trim().optional().default(""),
   leadUnitPrice: z.string().trim().optional().default(""),
+  leadActivationFee: z.string().trim().optional().default(""),
   status: z
     .enum(["DRAFT", "NOT_ISSUED", "WAITING", "ISSUED", "NO_INVOICE", "PAID"], {
       message: "Wybierz status",
@@ -63,6 +65,7 @@ interface ParsedInvoice {
   notes: string | null;
   leadsQty: number | null;
   leadUnitPriceGr: number | null;
+  leadActivationFeeGr: number | null;
   status?: "DRAFT" | "NOT_ISSUED" | "WAITING" | "ISSUED" | "NO_INVOICE" | "PAID";
 }
 
@@ -97,6 +100,7 @@ function parseInvoiceInput(
     .some((t) => t.trim().toLowerCase() === LEADS_OFFER_TAG.toLowerCase());
   let leadsQty: number | null = null;
   let leadUnitPriceGr: number | null = null;
+  let leadActivationFeeGr: number | null = null;
   let netGr: number | null = null;
 
   const qtyRaw = (d.leadsQty ?? "").trim();
@@ -110,9 +114,18 @@ function parseInvoiceInput(
     if (priceGr === null || priceGr < 0) {
       return { success: false, error: "Podaj poprawną cenę za lead, np. 50,00" };
     }
+    // opłata aktywacyjna (opcjonalna) — dolicza się do netto paczki
+    const feeRaw = (d.leadActivationFee ?? "").trim();
+    if (feeRaw !== "") {
+      const feeGr = parseMoneyToGr(feeRaw);
+      if (feeGr === null || feeGr < 0) {
+        return { success: false, error: "Podaj poprawną opłatę aktywacyjną, np. 1500,00" };
+      }
+      leadActivationFeeGr = feeGr;
+    }
     leadsQty = qty;
     leadUnitPriceGr = priceGr;
-    netGr = qty * priceGr;
+    netGr = qty * priceGr + (leadActivationFeeGr ?? 0);
   } else {
     netGr = parseMoneyToGr(d.net);
   }
@@ -152,6 +165,7 @@ function parseInvoiceInput(
       notes: notes || null,
       leadsQty,
       leadUnitPriceGr,
+      leadActivationFeeGr,
       status: d.status,
     },
   };
@@ -194,6 +208,7 @@ export async function createInvoiceAction(
       grossGr: d.grossGr,
       leadsQty: d.leadsQty,
       leadUnitPriceGr: d.leadUnitPriceGr,
+      leadActivationFeeGr: d.leadActivationFeeGr,
       offerTags: d.offerTags,
       notes: d.notes,
     },
@@ -250,6 +265,7 @@ export async function updateInvoiceAction(
         grossGr: d.grossGr,
         leadsQty: d.leadsQty,
         leadUnitPriceGr: d.leadUnitPriceGr,
+        leadActivationFeeGr: d.leadActivationFeeGr,
         offerTags: d.offerTags,
         notes: d.notes,
       },

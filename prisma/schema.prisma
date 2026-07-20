@@ -105,6 +105,7 @@ model Invoice {
   // null gdy przychód nie jest paczką leadów (kwota wpisana wprost).
   leadsQty       Int? // liczba sprzedanych leadów na fakturze
   leadUnitPriceGr Int? // cena jednostkowa leada NETTO w groszach
+  leadActivationFeeGr Int? // opłata aktywacyjna NETTO (gr) — doliczana do netto paczki
   notes     String?
   createdAt DateTime  @default(now())
 

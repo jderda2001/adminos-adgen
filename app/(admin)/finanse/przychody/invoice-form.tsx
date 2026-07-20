@@ -76,6 +76,7 @@ export function InvoiceFormDialog({
   // Paczki leadów: liczba leadów × cena jednostkowa (netto) → kwota netto
   const [leadsQty, setLeadsQty] = useState("");
   const [leadUnitPrice, setLeadUnitPrice] = useState("");
+  const [leadActivationFee, setLeadActivationFee] = useState("");
 
   const today = todayUTC();
   const defaultSaleDate = invoice
@@ -93,6 +94,9 @@ export function InvoiceFormDialog({
     setLeadsQty(invoice?.leadsQty != null ? String(invoice.leadsQty) : "");
     setLeadUnitPrice(
       invoice?.leadUnitPriceGr != null ? formatAmount(invoice.leadUnitPriceGr) : ""
+    );
+    setLeadActivationFee(
+      invoice?.leadActivationFeeGr != null ? formatAmount(invoice.leadActivationFeeGr) : ""
     );
   }
 
@@ -140,14 +144,19 @@ export function InvoiceFormDialog({
   // Paczki leadów: netto liczone jako liczba leadów × cena jednostkowa (netto).
   const qtyInt = leadsQty.trim() === "" ? null : Number(leadsQty.replace(/\s/g, ""));
   const unitPriceGr = leadUnitPrice.trim() === "" ? null : parseMoneyToGr(leadUnitPrice);
+  // opłata aktywacyjna: puste pole = 0; nieparsowalna = null (blokuje wyliczenie)
+  const activationFeeGr =
+    leadActivationFee.trim() === "" ? 0 : parseMoneyToGr(leadActivationFee);
   const leadsNetGr =
     hasLeads &&
     qtyInt !== null &&
     Number.isInteger(qtyInt) &&
     qtyInt >= 1 &&
     unitPriceGr !== null &&
-    unitPriceGr >= 0
-      ? qtyInt * unitPriceGr
+    unitPriceGr >= 0 &&
+    activationFeeGr !== null &&
+    activationFeeGr >= 0
+      ? qtyInt * unitPriceGr + activationFeeGr
       : null;
   // W trybie leadów (oba pola wypełnione) netto jest wyliczone i tylko do odczytu
   const leadsMode = hasLeads && leadsNetGr !== null;
@@ -178,6 +187,7 @@ export function InvoiceFormDialog({
       notes: String(formData.get("notes") ?? ""),
       leadsQty: hasLeads ? leadsQty : "",
       leadUnitPrice: hasLeads ? leadUnitPrice : "",
+      leadActivationFee: hasLeads ? leadActivationFee : "",
       status: String(formData.get("status") ?? "ISSUED"),
     };
     startTransition(async () => {
@@ -423,6 +433,19 @@ export function InvoiceFormDialog({
                       placeholder="50,00"
                     />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="leadActivationFee">Opłata aktywacyjna (netto, zł)</Label>
+                  <Input
+                    id="leadActivationFee"
+                    inputMode="decimal"
+                    value={leadActivationFee}
+                    onChange={(e) => setLeadActivationFee(e.target.value)}
+                    placeholder="np. 500 lub 1500 — opcjonalnie"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Dolicza się do kwoty netto faktury (leady × cena + opłata).
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="leadCategory">Leady na</Label>

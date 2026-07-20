@@ -90,6 +90,7 @@ export interface InvoiceRow {
   notes: string | null;
   leadsQty: number | null;
   leadUnitPriceGr: number | null;
+  leadActivationFeeGr: number | null;
 }
 
 export interface ClientOption {
