@@ -248,19 +248,28 @@ export function CostFormDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="note">Notatka</Label>
+            <Label htmlFor="note">Komentarz</Label>
             <Textarea
               id="note"
               name="note"
               rows={2}
               defaultValue={cost?.note ?? ""}
+              placeholder="Opis kosztu, ustalenia, kontekst…"
             />
           </div>
 
           {/* Nr rachunku dostawcy, Nr dokumentu i Załącznik tymczasowo ukryte
               (niepotrzebne teraz przy dodawaniu kosztu — backend nadal je obsługuje) */}
 
-          {!cost && (
+          {/* Cykliczność: przy nowym koszcie oraz przy edycji kosztu, który nie
+              jest jeszcze cykliczny (żeby dało się go „ucyklicznić" po fakcie).
+              Koszt już z szablonu — tylko informacja. */}
+          {cost?.recurringCostId ? (
+            <p className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground">
+              Ten koszt jest cykliczny (z szablonu). Kwotę, termin i koniec generowania
+              zmienisz w „Koszty cykliczne".
+            </p>
+          ) : (
             <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
               <div className="flex items-center gap-2">
                 <Checkbox
@@ -268,7 +277,9 @@ export function CostFormDialog({
                   checked={isRecurring}
                   onCheckedChange={(checked) => setIsRecurring(checked === true)}
                 />
-                <Label htmlFor="recurringCheckbox">Powtarzaj co miesiąc</Label>
+                <Label htmlFor="recurringCheckbox">
+                  {cost ? "Ustaw jako koszt cykliczny (co miesiąc)" : "Powtarzaj co miesiąc"}
+                </Label>
                 <input
                   type="hidden"
                   name="isRecurring"
@@ -290,8 +301,8 @@ export function CostFormDialog({
                     className="w-24"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Co miesiąc powstanie kopia kosztu do potwierdzenia. Jeśli numer
-                    dokumentu zawiera miesiąc (np. 07/2026), zostanie automatycznie
+                    Powstanie szablon i co miesiąc kopia kosztu do potwierdzenia. Jeśli
+                    numer dokumentu zawiera miesiąc (np. 07/2026), zostanie automatycznie
                     podmieniany.
                   </p>
                 </div>

@@ -8,6 +8,7 @@ import {
   CircleX,
   Download,
   Info,
+  MessageSquare,
   Paperclip,
   Pencil,
   Clock,
@@ -32,6 +33,7 @@ import { PeriodFilter } from "@/components/period-filter";
 import { StatusBadge, costTone } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { TableCell } from "@/components/ui/table";
 import {
   AlertDialog,
@@ -318,18 +320,86 @@ function InlineDue({ cost }: { cost: CostRow }) {
   );
 }
 
+/** Komentarz do kosztu (jak w Excelu) — ikona w wierszu, popover z edycją */
+function InlineComment({ cost }: { cost: CostRow }) {
+  const { pending, run } = useCostPatch();
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState(cost.note ?? "");
+  const has = !!cost.note?.trim();
+
+  function save() {
+    const next = val.trim();
+    if (next !== (cost.note ?? "").trim()) run(cost.id, { note: next || null });
+    setOpen(false);
+  }
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o);
+        if (o) setVal(cost.note ?? "");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          onClick={(e) => e.stopPropagation()}
+          title={has ? cost.note! : "Dodaj komentarz"}
+          aria-label={has ? "Komentarz do kosztu" : "Dodaj komentarz"}
+          className={cn(
+            "shrink-0 transition",
+            has
+              ? "text-primary"
+              : "text-muted-foreground/40 opacity-0 hover:text-foreground group-hover:opacity-100"
+          )}
+        >
+          <MessageSquare className="size-3.5" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 space-y-2">
+        <div className="text-xs font-medium text-muted-foreground">Komentarz</div>
+        <Textarea
+          autoFocus
+          rows={3}
+          value={val}
+          disabled={pending}
+          onChange={(e) => setVal(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              save();
+            }
+          }}
+          placeholder="Opisz koszt, ustalenia, kontekst…"
+        />
+        <div className="flex items-center justify-end gap-2">
+          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
+            Anuluj
+          </Button>
+          <Button type="button" size="sm" onClick={save} disabled={pending}>
+            Zapisz
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function CostsTable({
   costs,
   categories,
   clients,
   supplierNames,
   templates,
+  prevVat,
 }: {
   costs: CostRow[];
   categories: SelectOption[];
   clients: SelectOption[];
   supplierNames: string[];
   templates: RecurringRow[];
+  prevVat: { monthLabel: string; dueGr: number };
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -477,6 +547,7 @@ export function CostsTable({
                 </Tooltip>
               </TooltipProvider>
             )}
+            <InlineComment cost={row.original} />
           </div>
         ),
       },
@@ -544,7 +615,7 @@ export function CostsTable({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard
           label="Suma kosztów netto (okres)"
           value={formatMoney(totals.netGr)}
@@ -561,6 +632,15 @@ export function CostsTable({
           value={formatMoney(kpi.overdueGrossGr)}
           sub={`${kpi.overdueCount} ${pluralPl(kpi.overdueCount, "pozycja", "pozycje", "pozycji")} po terminie`}
           tone={kpi.overdueGrossGr > 0 ? "negative" : "default"}
+        />
+        <KpiCard
+          label={`VAT za ${prevVat.monthLabel}`}
+          value={formatMoney(Math.abs(prevVat.dueGr))}
+          sub={
+            prevVat.dueGr < 0
+              ? "nadwyżka naliczonego (do zwrotu)"
+              : "odłożony na osobnym koncie — nie jest kosztem"
+          }
         />
       </div>
 
@@ -894,7 +974,7 @@ export function CostsTable({
             )}
             {detail.note && (
               <div className="pt-3">
-                <div className="text-sm text-muted-foreground">Notatka</div>
+                <div className="text-sm text-muted-foreground">Komentarz</div>
                 <p className="mt-1 text-sm whitespace-pre-wrap">{detail.note}</p>
               </div>
             )}

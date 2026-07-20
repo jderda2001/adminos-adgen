@@ -165,7 +165,13 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
         header: "Status",
         cell: ({ row }) => (
           <StatusBadge
-            tone={row.original.status === "ACTIVE" ? "green" : "neutral"}
+            tone={
+              row.original.status === "ACTIVE"
+                ? "green"
+                : row.original.status === "INACTIVE"
+                  ? "amber"
+                  : "neutral"
+            }
           >
             {CLIENT_STATUS_LABELS[row.original.status as ClientStatus] ??
               row.original.status}
@@ -266,6 +272,7 @@ export function ClientsTable({ clients }: { clients: ClientRow[] }) {
           <SelectContent>
             <SelectItem value="all">Wszystkie statusy</SelectItem>
             <SelectItem value="ACTIVE">Aktywni</SelectItem>
+            <SelectItem value="INACTIVE">Nieaktywni</SelectItem>
             <SelectItem value="ENDED">Zakończeni</SelectItem>
           </SelectContent>
         </Select>

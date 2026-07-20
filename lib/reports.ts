@@ -134,6 +134,34 @@ export async function getDashboardData(period: Period): Promise<DashboardData> {
   };
 }
 
+/**
+ * VAT netto za POPRZEDNI miesiąc kalendarzowy (należny ze sprzedaży − naliczony
+ * z kosztów). To kwota, którą trzymamy odłożoną na osobnym koncie i płacimy do
+ * US w bieżącym miesiącu — NIE jest kosztem (operujemy na netto). Zawsze liczony
+ * względem dziś, niezależnie od filtra okresu na liście kosztów.
+ */
+export async function getPreviousMonthVat(): Promise<{
+  month: string;
+  dueGr: number;
+  outputGr: number;
+  inputGr: number;
+}> {
+  const month = shiftMonth(monthKey(todayUTC()), -1);
+  const { from, to } = monthBounds(month);
+  const [revenueAgg, costAgg] = await Promise.all([
+    db.invoice.aggregate({
+      where: { ...REVENUE_WHERE, saleDate: { gte: from, lt: to } },
+      _sum: { vatGr: true },
+    }),
+    db.cost.aggregate({
+      where: { ...COST_WHERE, docDate: { gte: from, lt: to } },
+      _sum: { vatGr: true },
+    }),
+  ]);
+  const vat = computeVatSummary(revenueAgg._sum.vatGr ?? 0, costAgg._sum.vatGr ?? 0);
+  return { month, dueGr: vat.dueGr, outputGr: vat.outputVatGr, inputGr: vat.inputVatGr };
+}
+
 export interface MonthlyPoint {
   month: string; // "RRRR-MM"
   revenueGr: number;

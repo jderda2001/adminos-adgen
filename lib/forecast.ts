@@ -614,21 +614,38 @@ export function buildForecast(input: ForecastInput): ForecastResult {
       const alreadyInvoiced = invoicedPeriods.get(c.id)?.has(period) ?? false;
       if (!alreadyInvoiced) {
         const pat = patternOf(c.id);
-        // rozliczenie z dołu: faktura za miesiąc świadczenia wychodzi 1. dnia
-        // NASTĘPNEGO miesiąca (z góry — w bieżącym); to przesuwa wpływ gotówki
-        const issuePeriod =
-          c.billingTiming === "ARREARS" ? addMonthsToPeriod(period, 1) : period;
-        const issueIso = periodDayIso(issuePeriod, pat.issueDay);
-        const dateIso = addDaysIso(issueIso, pat.termDays + effectiveDelayDays(paymentStats, c.id));
-        forecastInflowEvents.push({
-          dateIso,
-          period: periodOf(dateIso),
-          amountGr: Math.round(netGr * pat.grossMultiplier),
-          source: source === "ABONAMENT" ? "PROGNOZA_MRR" : "PROGNOZA_RUNRATE",
-          label: `Prognoza: ${c.name}`,
-          clientId: c.id,
-          assumed: !contracted,
-        });
+        const grossGr = Math.round(netGr * pat.grossMultiplier);
+        const forecastSource: "PROGNOZA_MRR" | "PROGNOZA_RUNRATE" =
+          source === "ABONAMENT" ? "PROGNOZA_MRR" : "PROGNOZA_RUNRATE";
+        // rozliczenie: z dołu → cała kwota miesiąc później; dzielona → 50%
+        // w miesiącu świadczenia i 50% w kolejnym; z góry → cała w bieżącym.
+        // (przychód/MRR zostaje w całości w miesiącu — dzielimy tylko cash-flow)
+        const parts: { issuePeriod: string; amountGr: number }[] =
+          c.billingTiming === "SPLIT"
+            ? [
+                { issuePeriod: period, amountGr: Math.round(grossGr / 2) },
+                { issuePeriod: addMonthsToPeriod(period, 1), amountGr: grossGr - Math.round(grossGr / 2) },
+              ]
+            : [
+                {
+                  issuePeriod: c.billingTiming === "ARREARS" ? addMonthsToPeriod(period, 1) : period,
+                  amountGr: grossGr,
+                },
+              ];
+        const delayDays = effectiveDelayDays(paymentStats, c.id);
+        for (const part of parts) {
+          const issueIso = periodDayIso(part.issuePeriod, pat.issueDay);
+          const dateIso = addDaysIso(issueIso, pat.termDays + delayDays);
+          forecastInflowEvents.push({
+            dateIso,
+            period: periodOf(dateIso),
+            amountGr: part.amountGr,
+            source: forecastSource,
+            label: `Prognoza: ${c.name}`,
+            clientId: c.id,
+            assumed: !contracted,
+          });
+        }
       }
     }
 

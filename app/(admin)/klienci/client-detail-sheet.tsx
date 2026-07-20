@@ -146,7 +146,15 @@ export function ClientDetailSheet({
             Współpraca
           </h3>
           <DetailRow label="Status">
-            <StatusBadge tone={client.status === "ACTIVE" ? "green" : "neutral"}>
+            <StatusBadge
+              tone={
+                client.status === "ACTIVE"
+                  ? "green"
+                  : client.status === "INACTIVE"
+                    ? "amber"
+                    : "neutral"
+              }
+            >
               {statusLabel}
             </StatusBadge>
           </DetailRow>

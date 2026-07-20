@@ -163,6 +163,35 @@ function parseCostForm(
   };
 }
 
+/**
+ * Tworzy szablon kosztu cyklicznego z danych kosztu i zwraca jego id.
+ * Numer dokumentu z miesiącem/rokiem zamienia na placeholder {MM/RRRR}
+ * (co miesiąc podmieniany). Używane przy tworzeniu kosztu „od razu cyklicznego"
+ * oraz przy „ucyklicznianiu" istniejącego kosztu w edycji.
+ */
+async function createRecurringTemplateFromCost(d: CostData): Promise<string> {
+  const mm = String(d.docDate.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = d.docDate.getUTCFullYear();
+  const docNumberBase = d.docNumber.split(`${mm}/${yyyy}`).join("{MM/RRRR}");
+  const template = await db.recurringCost.create({
+    data: {
+      supplierName: d.supplierName,
+      supplierAccount: d.supplierAccount,
+      docNumber: docNumberBase,
+      netGr: d.netGr,
+      vatRate: d.vatRate,
+      categoryId: d.categoryId,
+      clientId: d.clientId,
+      dueDayOfMonth: d.dueDayOfMonth,
+      note: d.note,
+      // miesiąc dokumentu, nie dzisiejszy: koszt z poprzedniego miesiąca
+      // oznaczony jako cykliczny ma dostać kopię już za bieżący miesiąc
+      lastGeneratedPeriod: monthKey(d.docDate),
+    },
+  });
+  return template.id;
+}
+
 // ── Załączniki ───────────────────────────────────────────────────────
 
 interface AttachmentFile {
@@ -250,31 +279,10 @@ export async function createCostAction(
   const refError = await validateReferences(d.categoryId, d.clientId);
   if (refError) return fail(refError);
 
-  // Szablon cykliczny: baza numeru dokumentu z placeholderem {MM/RRRR}
+  // Szablon cykliczny (opcjonalnie): baza numeru dokumentu z placeholderem {MM/RRRR}
   let recurringCostId: string | null = null;
   if (d.isRecurring) {
-    const mm = String(d.docDate.getUTCMonth() + 1).padStart(2, "0");
-    const yyyy = d.docDate.getUTCFullYear();
-    const docNumberBase = d.docNumber
-      .split(`${mm}/${yyyy}`)
-      .join("{MM/RRRR}");
-    const template = await db.recurringCost.create({
-      data: {
-        supplierName: d.supplierName,
-        supplierAccount: d.supplierAccount,
-        docNumber: docNumberBase,
-        netGr: d.netGr,
-        vatRate: d.vatRate,
-        categoryId: d.categoryId,
-        clientId: d.clientId,
-        dueDayOfMonth: d.dueDayOfMonth,
-        note: d.note,
-        // miesiąc dokumentu, nie dzisiejszy: koszt z poprzedniego miesiąca
-        // oznaczony jako cykliczny ma dostać kopię już za bieżący miesiąc
-        lastGeneratedPeriod: monthKey(d.docDate),
-      },
-    });
-    recurringCostId = template.id;
+    recurringCostId = await createRecurringTemplateFromCost(d);
   }
 
   const cost = await db.cost.create({
@@ -327,6 +335,13 @@ export async function updateCostAction(
   const refError = await validateReferences(d.categoryId, d.clientId);
   if (refError) return fail(refError);
 
+  // „Ucyklicznienie" istniejącego kosztu: gdy zaznaczono cykliczny, a koszt nie
+  // ma jeszcze szablonu — utwórz szablon i podepnij (istniejący zostaje historią)
+  const makeRecurring = d.isRecurring && !existing.recurringCostId;
+  const recurringCostId = makeRecurring
+    ? await createRecurringTemplateFromCost(d)
+    : existing.recurringCostId;
+
   await db.cost.update({
     where: { id },
     data: {
@@ -344,6 +359,7 @@ export async function updateCostAction(
       paid: d.paid,
       paidDate: d.paidDate,
       note: d.note,
+      recurringCostId,
     },
   });
 
@@ -352,7 +368,11 @@ export async function updateCostAction(
   }
 
   revalidatePath(KOSZTY_PATH);
-  return ok("Zmiany zostały zapisane");
+  return ok(
+    makeRecurring
+      ? "Zapisano — koszt ustawiony jako cykliczny (szablon utworzony)"
+      : "Zmiany zostały zapisane"
+  );
 }
 
 // Edycja inline pojedynczych pól z listy kosztów (bez otwierania formularza).
@@ -364,6 +384,7 @@ export async function patchCostAction(
     supplierName?: string;
     dueDate?: string | null;
     netGr?: number;
+    note?: string | null;
     status?: "NONE" | "APPROVED" | "DELAYED" | "PAID";
   }
 ): Promise<ActionResult> {
@@ -378,6 +399,7 @@ export async function patchCostAction(
     netGr?: number;
     vatGr?: number;
     grossGr?: number;
+    note?: string | null;
     paid?: boolean;
     paidDate?: Date | null;
     approvedForPayment?: boolean;
@@ -424,6 +446,10 @@ export async function patchCostAction(
     data.netGr = patch.netGr;
     data.vatGr = vatGr;
     data.grossGr = grossGr;
+  }
+  if (patch.note !== undefined) {
+    const n = (patch.note ?? "").trim();
+    data.note = n ? n.slice(0, 2000) : null;
   }
 
   if (Object.keys(data).length === 0) return ok("Bez zmian");

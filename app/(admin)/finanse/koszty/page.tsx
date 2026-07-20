@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
-import { generateRecurringCosts, getAdBudgetStatus } from "@/lib/reports";
+import {
+  generateRecurringCosts,
+  getAdBudgetStatus,
+  getPreviousMonthVat,
+} from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
-import { todayUTC } from "@/lib/format";
+import { formatMonth, todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
 import { AdBudgetSummary } from "@/components/ad-budget-summary";
 import { buildCostFilters, type CostFilterParams } from "./filters";
@@ -48,6 +52,9 @@ export default async function CostsPage({
 
   // budżet reklamowy bieżącego miesiąca (plan marek vs wydane wg Mety) — banner
   const adBudget = await getAdBudgetStatus(monthKey(today));
+  // VAT za poprzedni miesiąc (odłożony, płatny do US w tym miesiącu) — kafelek
+  const prevVatRaw = await getPreviousMonthVat();
+  const prevVat = { monthLabel: formatMonth(prevVatRaw.month), dueGr: prevVatRaw.dueGr };
 
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
@@ -145,6 +152,7 @@ export default async function CostsPage({
           clients={clients}
           supplierNames={supplierNames}
           templates={templateRows}
+          prevVat={prevVat}
         />
       </div>
     </>

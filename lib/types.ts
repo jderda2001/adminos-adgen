@@ -41,10 +41,11 @@ export const BILLING_MODEL_LABELS: Record<BillingModel, string> = {
   PAKIETY_LEADOW: "Paczki leadów",
 };
 
-export const CLIENT_STATUSES = ["ACTIVE", "ENDED"] as const;
+export const CLIENT_STATUSES = ["ACTIVE", "INACTIVE", "ENDED"] as const;
 export type ClientStatus = (typeof CLIENT_STATUSES)[number];
 export const CLIENT_STATUS_LABELS: Record<ClientStatus, string> = {
   ACTIVE: "Aktywny",
+  INACTIVE: "Nieaktywny",
   ENDED: "Zakończony",
 };
 
@@ -75,11 +76,13 @@ export const CONTRACT_TYPE_ONE_OFF: Record<ContractType, boolean> = {
 };
 
 // Rozliczenie: z góry (faktura za bieżący miesiąc) / z dołu (za miniony miesiąc)
-export const BILLING_TIMINGS = ["UPFRONT", "ARREARS"] as const;
+// / dzielona (50% w miesiącu świadczenia, 50% w kolejnym)
+export const BILLING_TIMINGS = ["UPFRONT", "ARREARS", "SPLIT"] as const;
 export type BillingTiming = (typeof BILLING_TIMINGS)[number];
 export const BILLING_TIMING_LABELS: Record<BillingTiming, string> = {
   UPFRONT: "Z góry (za bieżący miesiąc)",
   ARREARS: "Z dołu (za miniony miesiąc)",
+  SPLIT: "Płatność dzielona (50/50)",
 };
 
 // Stawki VAT: wartość w bazie → ułamek i etykieta
@@ -183,6 +186,7 @@ export const DEFAULT_OFFER_TAGS = [
   "TIKTOK ADS",
   "SOCIAL MEDIA ABO",
   "PAKIETY LEADÓW",
+  "OBDZWANIANIE LEADÓW",
   "INNE",
 ] as const;
 
