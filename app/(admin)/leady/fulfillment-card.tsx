@@ -1,29 +1,20 @@
 "use client";
 
-// „Dostawy vs kontrakt" — pogrupowane po WERTYKALU (niszy). Każda nisza to sekcja
-// z pulą: ile leadów marka wygenerowała (Meta), ile przypisaliśmy klientom i ile
-// zostało nieprzypisanych (leżą). Kontrakt (liczba leadów z faktur PAKIETY LEADÓW)
-// zaciąga się z Przychodów; „Dowiezione" wpisujesz ręcznie inline (przypisujecie
-// leady ręcznie). Przycisk „paczka dostarczona" domyka całe zobowiązanie wiersza.
-// Dług/nadwyżka przenosi się na kolejne miesiące (kolumna „Bilans").
+// „Dostawy vs kontrakt" — widok główny to KAFELKI nisz (wertykałów) z pulą:
+// ile leadów marka wygenerowała (Meta) → ile przypisaliśmy klientom → ile leży
+// nieprzypisanych. Kliknięcie kafelka wysuwa panel z klientami: kontrakt (z
+// Przychodów), inline-edytowalne „Dowiezione" (przypisujecie ręcznie), bilans
+// (dług/nadwyżka narastająco) i przycisk „paczka dostarczona" (domyka wiersz).
 
 import { useState, useTransition } from "react";
 import { Check, PackageCheck, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
-import { formatMoney } from "@/lib/format";
+import { DetailSheet } from "@/components/detail-sheet";
+import { formatMoney, pluralPl } from "@/lib/format";
 import { DeliveryDialog, type ClientOption } from "./delivery-dialog";
 import { setDeliveredAction } from "./actions";
 import type { BrandOption } from "./campaign-dialog";
@@ -59,8 +50,8 @@ function UnassignedBadge({ value }: { value: number }) {
   return <StatusBadge tone="neutral">rozdane</StatusBadge>;
 }
 
-// Wiersz klienta z inline-edytowalnym „Dowiezione" i przyciskiem „paczka dostarczona".
-function ClientRow({ month, row }: { month: string; row: FulfillmentRow }) {
+// Blok klienta w panelu niszy: inline-edytowalne „Dowiezione" + „paczka dostarczona".
+function ClientBlock({ month, row }: { month: string; row: FulfillmentRow }) {
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(row.delivered));
@@ -93,10 +84,16 @@ function ClientRow({ month, row }: { month: string; row: FulfillmentRow }) {
   }
 
   return (
-    <TableRow>
-      <TableCell className="font-medium">{row.clientName}</TableCell>
-      <TableCell className="text-right tabular-nums">{row.owed}</TableCell>
-      <TableCell className="text-right">
+    <div className="rounded-lg border px-3 py-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium">{row.clientName}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          kontrakt {row.owed} · koszt {formatMoney(row.costGr)}
+        </span>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted-foreground">dowiezione</span>
         {editing ? (
           <span className="inline-flex items-center gap-1">
             <Input
@@ -140,26 +137,30 @@ function ClientRow({ month, row }: { month: string; row: FulfillmentRow }) {
             <Pencil className="size-3 text-muted-foreground" />
           </button>
         )}
-      </TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          <BalanceBadge balance={row.balance} />
-          {row.balance > 0 && (
-            <Button
-              size="xs"
-              variant="ghost"
-              className="text-primary"
-              disabled={pending}
-              onClick={() => commit(String(row.owed))}
-              title="Ustaw dowiezione = całe zobowiązanie (kontrakt + dług)"
-            >
-              <PackageCheck data-icon="inline-start" /> paczka dostarczona
-            </Button>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="text-right tabular-nums">{formatMoney(row.costGr)}</TableCell>
-    </TableRow>
+        <BalanceBadge balance={row.balance} />
+        {row.balance > 0 && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="ml-auto text-primary"
+            disabled={pending}
+            onClick={() => commit(String(row.owed))}
+            title="Ustaw dowiezione = całe zobowiązanie (kontrakt + dług)"
+          >
+            <PackageCheck data-icon="inline-start" /> paczka dostarczona
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PoolStat({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg bg-muted/50 p-2.5 text-center">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-base font-semibold tabular-nums">{children}</div>
+    </div>
   );
 }
 
@@ -178,24 +179,23 @@ export function FulfillmentCard({
   verticals: string[];
   verticalsWithCampaign: string[];
 }) {
-  const allRows = sections.flatMap((s) => s.rows);
-  const totals = allRows.reduce(
-    (a, r) => ({
-      owed: a.owed + r.owed,
-      delivered: a.delivered + r.delivered,
-      costGr: a.costGr + r.costGr,
-    }),
-    { owed: 0, delivered: 0, costGr: 0 }
-  );
+  const [openVertical, setOpenVertical] = useState<string | null>(null);
+  const active = sections.find((s) => s.vertical === openVertical) ?? null;
+  const unassignedClass =
+    active && active.unassigned > 0
+      ? "text-blue-600 dark:text-blue-400"
+      : active && active.unassigned < 0
+        ? "text-muted-foreground"
+        : "";
 
   return (
-    <div className="rounded-xl border bg-card shadow-[var(--shadow-card)]">
-      <div className="flex items-center justify-between gap-2 px-4 py-3">
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold">Dostawy vs kontrakt</h2>
           <p className="text-xs text-muted-foreground">
-            Nisze z pulą leadów: wygenerowane (Meta) → przypisane klientom → nieprzypisane.
-            Kontrakt z Przychodów; „Dowiezione" wpisujesz ręcznie.
+            Kafelki nisz: wygenerowane (Meta) → przypisane → nieprzypisane. Kliknij niszę,
+            aby zobaczyć klientów i wpisać „dowiezione".
           </p>
         </div>
         <DeliveryDialog
@@ -213,75 +213,129 @@ export function FulfillmentCard({
       </div>
 
       {sections.length === 0 ? (
-        <div className="px-4 pb-4">
+        <div className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
           <EmptyState
             title="Brak kontraktów i kampanii w tym miesiącu"
             description={'Dodaj klientom leadowym fakturę „PAKIETY LEADÓW” w Przychodach (kontrakt) albo zaciągnij kampanie z Mety — nisze pojawią się tu automatycznie.'}
           />
         </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Klient</TableHead>
-              <TableHead className="text-right">Kontrakt</TableHead>
-              <TableHead className="text-right">Dowiezione</TableHead>
-              <TableHead>Bilans</TableHead>
-              <TableHead className="text-right">Koszt leadów</TableHead>
-            </TableRow>
-          </TableHeader>
-          {sections.map((sec) => (
-            <TableBody key={sec.vertical}>
-              <TableRow className="border-t-2 bg-muted/50 hover:bg-muted/50">
-                <TableCell colSpan={5} className="py-2">
-                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-sm font-semibold">{sec.vertical}</span>
-                      <span className="text-xs text-muted-foreground">
-                        CPL {sec.cplGr !== null ? formatMoney(sec.cplGr) : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                      <span>
-                        wygenerowane{" "}
-                        <span className="font-medium tabular-nums text-foreground">{sec.generated}</span>
-                      </span>
-                      <span>
-                        przypisane{" "}
-                        <span className="font-medium tabular-nums text-foreground">{sec.assigned}</span>
-                      </span>
-                      <UnassignedBadge value={sec.unassigned} />
-                    </div>
-                  </div>
-                </TableCell>
-              </TableRow>
-              {sec.rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={5} className="py-2 text-xs text-muted-foreground">
-                    Brak przypisań — {sec.generated > 0
-                      ? `wszystkie ${sec.generated} leadów tej niszy leży nieprzypisane`
-                      : "brak kontraktów i leadów w tym miesiącu"}
-                    .
-                  </TableCell>
-                </TableRow>
-              ) : (
-                sec.rows.map((r) => (
-                  <ClientRow key={`${r.clientId}|${r.vertical}`} month={month} row={r} />
-                ))
-              )}
-            </TableBody>
-          ))}
-          <TableFooter>
-            <TableRow>
-              <TableCell>Razem ({allRows.length})</TableCell>
-              <TableCell className="text-right tabular-nums">{totals.owed}</TableCell>
-              <TableCell className="text-right tabular-nums">{totals.delivered}</TableCell>
-              <TableCell />
-              <TableCell className="text-right tabular-nums">{formatMoney(totals.costGr)}</TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {sections.map((sec) => {
+            const openDebt = sec.rows.reduce((n, r) => n + Math.max(0, r.balance), 0);
+            return (
+              <button
+                key={sec.vertical}
+                type="button"
+                onClick={() => setOpenVertical(sec.vertical)}
+                className="rounded-xl border bg-card p-4 text-left shadow-[var(--shadow-card)] transition-colors hover:border-primary/40 hover:bg-muted/30"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-sm font-semibold">{sec.vertical}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    CPL {sec.cplGr !== null ? formatMoney(sec.cplGr) : "—"}
+                  </span>
+                </div>
+
+                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <span>
+                    wygen.{" "}
+                    <span className="font-medium text-foreground tabular-nums">{sec.generated}</span>
+                  </span>
+                  <span>
+                    przyp.{" "}
+                    <span className="font-medium text-foreground tabular-nums">{sec.assigned}</span>
+                  </span>
+                  <UnassignedBadge value={sec.unassigned} />
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-2 border-t pt-2 text-xs">
+                  <span className="text-muted-foreground">
+                    {sec.rows.length}{" "}
+                    {pluralPl(sec.rows.length, "klient", "klienci", "klientów")}
+                  </span>
+                  {openDebt > 0 ? (
+                    <StatusBadge tone="amber">−{openDebt} do dowiezienia</StatusBadge>
+                  ) : sec.rows.length > 0 ? (
+                    <StatusBadge tone="green" dot>
+                      rozliczone
+                    </StatusBadge>
+                  ) : (
+                    <span className="text-muted-foreground">brak przypisań</span>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
       )}
+
+      <DetailSheet
+        open={active !== null}
+        onOpenChange={(o) => !o && setOpenVertical(null)}
+        title={active ? active.vertical : "Nisza"}
+        description={
+          active
+            ? `CPL ${active.cplGr !== null ? formatMoney(active.cplGr) : "—"} · koszt leadów ${formatMoney(
+                active.rows.reduce((n, r) => n + r.costGr, 0)
+              )}`
+            : undefined
+        }
+        footer={
+          active ? (
+            <DeliveryDialog
+              month={month}
+              brands={brands}
+              clients={clients}
+              verticals={verticals}
+              verticalsWithCampaign={verticalsWithCampaign}
+              trigger={
+                <Button variant="outline" size="sm" className="w-full">
+                  <Plus data-icon="inline-start" /> Dodaj dostawę
+                </Button>
+              }
+            />
+          ) : undefined
+        }
+      >
+        {active && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              <PoolStat label="wygenerowane">{active.generated}</PoolStat>
+              <PoolStat label="przypisane">{active.assigned}</PoolStat>
+              <PoolStat label="nieprzypisane">
+                <span className={unassignedClass}>{active.unassigned}</span>
+              </PoolStat>
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Klienci ({active.rows.length})
+              </div>
+              {active.rows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Brak przypisań —{" "}
+                  {active.generated > 0
+                    ? `wszystkie ${active.generated} leadów tej niszy leży nieprzypisane.`
+                    : "brak kontraktów i leadów w tym miesiącu."}
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {active.rows.map((r) => (
+                    <ClientBlock key={r.clientId} month={month} row={r} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              „Nieprzypisane" = wygenerowane w niszy − przypisane klientom. Liczbę
+              „dowiezione" wpisujesz ręcznie (klik w liczbę); „paczka dostarczona"
+              ustawia ją na całe zobowiązanie wiersza.
+            </p>
+          </div>
+        )}
+      </DetailSheet>
     </div>
   );
 }
