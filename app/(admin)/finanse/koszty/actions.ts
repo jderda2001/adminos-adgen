@@ -465,6 +465,49 @@ export async function togglePaidAction(id: string): Promise<ActionResult> {
   );
 }
 
+/**
+ * Przerzuca niezapłacony koszt na następny miesiąc (nie wyrobiliśmy się z
+ * płatnością). Przesuwa datę dokumentu i termin o miesiąc (dzień zachowany,
+ * przycięty do długości miesiąca) i czyści status „opóźniamy"/„można płacić"
+ * — w nowym miesiącu zaczyna od „Brak działań".
+ */
+export async function rollCostToNextMonthAction(id: string): Promise<ActionResult> {
+  await requireAdmin();
+  const existing = await db.cost.findUnique({ where: { id } });
+  if (!existing) return fail("Koszt nie istnieje");
+  if (existing.paid) {
+    return fail("Zapłacony koszt — najpierw cofnij zapłatę, potem przerzuć");
+  }
+
+  const shift = (d: Date): Date => {
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    const day = d.getUTCDate();
+    const lastDayNext = new Date(Date.UTC(y, m + 2, 0)).getUTCDate();
+    return new Date(Date.UTC(y, m + 1, Math.min(day, lastDayNext)));
+  };
+  const newDoc = shift(existing.docDate);
+
+  await db.cost.update({
+    where: { id },
+    data: {
+      docDate: newDoc,
+      dueDate: existing.dueDate ? shift(existing.dueDate) : null,
+      delayed: false,
+      approvedForPayment: false,
+    },
+  });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(RW_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  revalidatePath("/dashboard");
+  revalidatePath("/rentownosc");
+  const mk = `${newDoc.getUTCFullYear()}-${String(newDoc.getUTCMonth() + 1).padStart(2, "0")}`;
+  return ok(`Koszt przerzucony na ${mk}`);
+}
+
 /** Przełącz akceptację do płatności ("Brak działań" ↔ "Można płacić") */
 export async function toggleApprovalAction(id: string): Promise<ActionResult> {
   await requireAdmin();

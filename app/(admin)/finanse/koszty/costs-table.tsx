@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
+  ArrowRight,
   CircleX,
   Download,
   Info,
@@ -73,6 +74,7 @@ import {
   togglePaidAction,
   toggleApprovalAction,
   toggleDelayedAction,
+  rollCostToNextMonthAction,
   patchCostAction,
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
@@ -785,6 +787,25 @@ export function CostsTable({
                 >
                   <Clock className="size-4" />
                   {detail.delayed ? "Cofnij opóźnienie" : "Opóźniamy"}
+                </Button>
+              )}
+              {!detail.paid && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pending}
+                  title="Przenieś ten koszt na następny miesiąc"
+                  onClick={() =>
+                    startTransition(async () => {
+                      const r = await rollCostToNextMonthAction(detail.id);
+                      if (r.ok) {
+                        toast.success(r.message);
+                        setDetail(null); // koszt zmienił miesiąc — zamknij panel
+                      } else toast.error(r.error);
+                    })
+                  }
+                >
+                  <ArrowRight className="size-4" /> Przerzuć
                 </Button>
               )}
               <Button
