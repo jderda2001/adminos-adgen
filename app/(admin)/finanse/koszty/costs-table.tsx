@@ -220,8 +220,8 @@ function InlineSupplier({ cost }: { cost: CostRow }) {
           setVal(cost.supplierName);
           setEditing(true);
         }}
-        className="max-w-full truncate text-left font-medium hover:text-primary"
-        title="Kliknij, aby edytować"
+        className="block max-w-[18rem] truncate text-left font-medium hover:text-primary"
+        title={cost.supplierName}
       >
         {cost.supplierName}
       </button>
