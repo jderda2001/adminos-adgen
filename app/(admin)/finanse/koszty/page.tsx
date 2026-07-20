@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin, isAuthDisabled } from "@/lib/auth";
 import {
   generateRecurringCosts,
   getAdBudgetStatus,
@@ -28,7 +28,7 @@ export default async function CostsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireAdmin();
+  const me = await requireAdmin();
 
   // leniwe generowanie miesięcznych kopii kosztów cyklicznych
   await generateRecurringCosts();
@@ -60,7 +60,11 @@ export default async function CostsPage({
     await Promise.all([
       db.cost.findMany({
         where,
-        include: { category: true, client: true },
+        include: {
+          category: true,
+          client: true,
+          comments: { orderBy: { createdAt: "asc" } },
+        },
         orderBy: { docDate: "desc" },
       }),
       db.cost.findMany({
@@ -105,7 +109,13 @@ export default async function CostsPage({
     approvedForPayment: c.approvedForPayment,
     delayed: c.delayed,
     paidDate: c.paidDate?.toISOString() ?? null,
-    note: c.note,
+    comments: c.comments.map((cm) => ({
+      id: cm.id,
+      authorId: cm.authorId,
+      authorName: cm.authorName,
+      body: cm.body,
+      createdAt: cm.createdAt.toISOString(),
+    })),
     attachmentName: c.attachmentPath ? (c.attachmentName ?? c.attachmentPath) : null,
     recurringCostId: c.recurringCostId,
     planned: c.needsConfirmation, // zaplanowana przyszła kopia cykliczna
@@ -153,6 +163,8 @@ export default async function CostsPage({
           supplierNames={supplierNames}
           templates={templateRows}
           prevVat={prevVat}
+          currentUserId={me.id}
+          authDisabled={isAuthDisabled()}
         />
       </div>
     </>

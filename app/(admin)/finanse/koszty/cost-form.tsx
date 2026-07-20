@@ -247,16 +247,20 @@ export function CostFormDialog({
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="note">Komentarz</Label>
-            <Textarea
-              id="note"
-              name="note"
-              rows={2}
-              defaultValue={cost?.note ?? ""}
-              placeholder="Opis kosztu, ustalenia, kontekst…"
-            />
-          </div>
+          {/* Komentarz tylko przy tworzeniu = pierwszy wpis w historii (autor =
+              bieżący użytkownik). Przy edycji komentarze dodaje się w wątku
+              (ikona komentarza w wierszu / panelu szczegółów). */}
+          {!cost && (
+            <div className="space-y-2">
+              <Label htmlFor="note">Komentarz</Label>
+              <Textarea
+                id="note"
+                name="note"
+                rows={2}
+                placeholder="Opis kosztu, ustalenia, kontekst… (opcjonalnie)"
+              />
+            </div>
+          )}
 
           {/* Nr rachunku dostawcy, Nr dokumentu i Załącznik tymczasowo ukryte
               (niepotrzebne teraz przy dodawaniu kosztu — backend nadal je obsługuje) */}

@@ -24,10 +24,11 @@ model User {
   monthlyBudgetGr    Int? // założenie miesięczne (budżet wypłaty) do rozliczenia zespołu
   createdAt          DateTime  @default(now())
 
-  sessions    Session[]
-  rates       HourlyRate[]
-  timeEntries TimeEntry[]
-  activeTimer ActiveTimer?
+  sessions     Session[]
+  rates        HourlyRate[]
+  timeEntries  TimeEntry[]
+  activeTimer  ActiveTimer?
+  costComments CostComment[]
 }
 
 model Session {
@@ -172,12 +173,29 @@ model Cost {
   attachmentName    String? // oryginalna nazwa pliku
   recurringCostId   String?
   recurringCost     RecurringCost? @relation(fields: [recurringCostId], references: [id], onDelete: SetNull)
+  comments          CostComment[]
   createdAt         DateTime  @default(now())
 
   @@index([docDate])
   @@index([clientId])
   @@index([categoryId])
   @@index([paid])
+}
+
+// Komentarz do kosztu — historia z autorem (kto i kiedy). authorName to snapshot
+// (historia czytelna nawet po zmianie nazwy/usunięciu konta); authorId FK do User
+// (SetNull po usunięciu). Append-only; autor może usunąć własny wpis.
+model CostComment {
+  id         String   @id @default(cuid())
+  costId     String
+  cost       Cost     @relation(fields: [costId], references: [id], onDelete: Cascade)
+  authorId   String?
+  author     User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([costId])
 }
 
 // Szablon kosztu cyklicznego — 1. dnia miesiąca (generowanie leniwe przy

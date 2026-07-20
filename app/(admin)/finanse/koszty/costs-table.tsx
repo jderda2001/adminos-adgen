@@ -18,6 +18,7 @@ import {
   Trash2,
   Upload,
   Wallet,
+  X,
 } from "lucide-react";
 import {
   Popover,
@@ -78,6 +79,8 @@ import {
   toggleDelayedAction,
   rollCostToNextMonthAction,
   patchCostAction,
+  addCostCommentAction,
+  deleteCostCommentAction,
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
 import { categoryBadgeClass, categoryPillClass } from "./category-color";
@@ -103,10 +106,18 @@ export interface CostRow {
   approvedForPayment: boolean;
   delayed: boolean;
   paidDate: string | null; // ISO
-  note: string | null;
+  comments: CostCommentItem[];
   attachmentName: string | null;
   recurringCostId: string | null;
   planned?: boolean; // zaplanowana przyszła kopia cykliczna (estymacja, jeszcze nie do zapłaty)
+}
+
+export interface CostCommentItem {
+  id: string;
+  authorId: string | null;
+  authorName: string;
+  body: string;
+  createdAt: string; // ISO
 }
 
 /** Etykieta statusu płatności kosztu */
@@ -320,66 +331,120 @@ function InlineDue({ cost }: { cost: CostRow }) {
   );
 }
 
-/** Komentarz do kosztu (jak w Excelu) — ikona w wierszu, popover z edycją */
-function InlineComment({ cost }: { cost: CostRow }) {
-  const { pending, run } = useCostPatch();
+/** Wątek komentarzy do kosztu — historia z autorem (kto i kiedy). */
+function CostComments({
+  cost,
+  currentUserId,
+  authDisabled,
+}: {
+  cost: CostRow;
+  currentUserId: string;
+  authDisabled: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const [val, setVal] = useState(cost.note ?? "");
-  const has = !!cost.note?.trim();
+  const [draft, setDraft] = useState("");
+  const [pending, startTransition] = useTransition();
+  const count = cost.comments.length;
 
-  function save() {
-    const next = val.trim();
-    if (next !== (cost.note ?? "").trim()) run(cost.id, { note: next || null });
-    setOpen(false);
+  function add() {
+    const text = draft.trim();
+    if (!text) return;
+    startTransition(async () => {
+      const res = await addCostCommentAction(cost.id, text);
+      if (res.ok) {
+        toast.success(res.message);
+        setDraft("");
+      } else {
+        toast.error(res.error);
+      }
+    });
+  }
+  function remove(id: string) {
+    startTransition(async () => {
+      const res = await deleteCostCommentAction(id);
+      if (!res.ok) toast.error(res.error);
+    });
   }
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) setVal(cost.note ?? "");
-      }}
-    >
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
           onClick={(e) => e.stopPropagation()}
-          title={has ? cost.note! : "Dodaj komentarz"}
-          aria-label={has ? "Komentarz do kosztu" : "Dodaj komentarz"}
+          title={count > 0 ? `Komentarze (${count})` : "Dodaj komentarz"}
+          aria-label={count > 0 ? `Komentarze (${count})` : "Dodaj komentarz"}
           className={cn(
-            "shrink-0 transition",
-            has
+            "relative shrink-0 transition",
+            count > 0
               ? "text-primary"
               : "text-muted-foreground/40 opacity-0 hover:text-foreground group-hover:opacity-100"
           )}
         >
           <MessageSquare className="size-3.5" />
+          {count > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 grid size-3.5 place-items-center rounded-full bg-primary text-[9px] font-semibold text-primary-foreground">
+              {count}
+            </span>
+          )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 space-y-2">
-        <div className="text-xs font-medium text-muted-foreground">Komentarz</div>
-        <Textarea
-          autoFocus
-          rows={3}
-          value={val}
-          disabled={pending}
-          onChange={(e) => setVal(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              save();
-            }
-          }}
-          placeholder="Opisz koszt, ustalenia, kontekst…"
-        />
-        <div className="flex items-center justify-end gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
-            Anuluj
-          </Button>
-          <Button type="button" size="sm" onClick={save} disabled={pending}>
-            Zapisz
-          </Button>
+      <PopoverContent align="start" className="w-80 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="text-xs font-medium text-muted-foreground">Komentarze</div>
+        {count > 0 ? (
+          <ul className="max-h-56 space-y-2.5 overflow-y-auto">
+            {cost.comments.map((c) => (
+              <li key={c.id} className="text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium">{c.authorName}</span>
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    {formatDate(new Date(c.createdAt))}
+                    {(c.authorId === currentUserId || c.authorId === null) && (
+                      <button
+                        type="button"
+                        onClick={() => remove(c.id)}
+                        disabled={pending}
+                        aria-label="Usuń komentarz"
+                        className="text-muted-foreground/60 hover:text-destructive"
+                      >
+                        <X className="size-3" />
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <p className="whitespace-pre-wrap text-muted-foreground">{c.body}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">Brak komentarzy.</p>
+        )}
+        <div className="space-y-2 border-t pt-2">
+          <Textarea
+            rows={2}
+            value={draft}
+            disabled={pending}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                add();
+              }
+            }}
+            placeholder="Napisz komentarz…"
+          />
+          <div className="flex items-center justify-between gap-2">
+            {authDisabled ? (
+              <span className="text-[11px] leading-tight text-muted-foreground">
+                Podpisze pierwszy admin — włącz logowanie, by rozróżniać autorów
+              </span>
+            ) : (
+              <span />
+            )}
+            <Button type="button" size="sm" onClick={add} disabled={pending || !draft.trim()}>
+              Dodaj
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>
@@ -393,6 +458,8 @@ export function CostsTable({
   supplierNames,
   templates,
   prevVat,
+  currentUserId,
+  authDisabled,
 }: {
   costs: CostRow[];
   categories: SelectOption[];
@@ -400,6 +467,8 @@ export function CostsTable({
   supplierNames: string[];
   templates: RecurringRow[];
   prevVat: { monthLabel: string; dueGr: number };
+  currentUserId: string;
+  authDisabled: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -547,7 +616,11 @@ export function CostsTable({
                 </Tooltip>
               </TooltipProvider>
             )}
-            <InlineComment cost={row.original} />
+            <CostComments
+              cost={row.original}
+              currentUserId={currentUserId}
+              authDisabled={authDisabled}
+            />
           </div>
         ),
       },
@@ -610,7 +683,7 @@ export function CostsTable({
         ),
       },
     ],
-    [categories]
+    [categories, currentUserId, authDisabled]
   );
 
   return (
@@ -972,10 +1045,24 @@ export function CostsTable({
                 </a>
               </DetailRow>
             )}
-            {detail.note && (
+            {detail.comments.length > 0 && (
               <div className="pt-3">
-                <div className="text-sm text-muted-foreground">Komentarz</div>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{detail.note}</p>
+                <div className="mb-1.5 text-sm text-muted-foreground">
+                  Komentarze ({detail.comments.length})
+                </div>
+                <ul className="space-y-2">
+                  {detail.comments.map((c) => (
+                    <li key={c.id} className="rounded-lg border bg-muted/30 px-3 py-2 text-sm">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-medium">{c.authorName}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(new Date(c.createdAt))}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{c.body}</p>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>

@@ -268,7 +268,7 @@ async function validateReferences(
 export async function createCostAction(
   formData: FormData
 ): Promise<ActionResult> {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const result = parseCostForm(formData);
   if (!result.success) return fail(result.error);
   const d = result.data;
@@ -300,10 +300,16 @@ export async function createCostAction(
       clientId: d.clientId,
       paid: d.paid,
       paidDate: d.paidDate,
-      note: d.note,
       recurringCostId,
     },
   });
+
+  // komentarz z formularza = pierwszy wpis w historii (autor = bieżący użytkownik)
+  if (d.note) {
+    await db.costComment.create({
+      data: { costId: cost.id, authorId: admin.id, authorName: admin.name, body: d.note },
+    });
+  }
 
   if (attachment.file) {
     await saveAttachment(cost.id, attachment.file, null);
@@ -358,7 +364,6 @@ export async function updateCostAction(
       clientId: d.clientId,
       paid: d.paid,
       paidDate: d.paidDate,
-      note: d.note,
       recurringCostId,
     },
   });
@@ -384,7 +389,6 @@ export async function patchCostAction(
     supplierName?: string;
     dueDate?: string | null;
     netGr?: number;
-    note?: string | null;
     status?: "NONE" | "APPROVED" | "DELAYED" | "PAID";
   }
 ): Promise<ActionResult> {
@@ -399,7 +403,6 @@ export async function patchCostAction(
     netGr?: number;
     vatGr?: number;
     grossGr?: number;
-    note?: string | null;
     paid?: boolean;
     paidDate?: Date | null;
     approvedForPayment?: boolean;
@@ -447,10 +450,6 @@ export async function patchCostAction(
     data.vatGr = vatGr;
     data.grossGr = grossGr;
   }
-  if (patch.note !== undefined) {
-    const n = (patch.note ?? "").trim();
-    data.note = n ? n.slice(0, 2000) : null;
-  }
 
   if (Object.keys(data).length === 0) return ok("Bez zmian");
 
@@ -472,6 +471,37 @@ export async function deleteCostAction(id: string): Promise<ActionResult> {
 
   revalidatePath(KOSZTY_PATH);
   return ok("Koszt został usunięty");
+}
+
+// ── Komentarze do kosztu (historia z autorem) ───────────────────────
+
+export async function addCostCommentAction(
+  costId: string,
+  body: string
+): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const text = (body ?? "").trim();
+  if (!text) return fail("Komentarz nie może być pusty");
+  const cost = await db.cost.findUnique({ where: { id: costId }, select: { id: true } });
+  if (!cost) return fail("Koszt nie istnieje");
+  await db.costComment.create({
+    data: { costId, authorId: admin.id, authorName: admin.name, body: text.slice(0, 4000) },
+  });
+  revalidatePath(KOSZTY_PATH);
+  return ok("Komentarz dodany");
+}
+
+export async function deleteCostCommentAction(commentId: string): Promise<ActionResult> {
+  const admin = await requireAdmin();
+  const c = await db.costComment.findUnique({ where: { id: commentId } });
+  if (!c) return fail("Komentarz nie istnieje");
+  // autor usuwa własny wpis; wpisy bez autora (np. migrowane) — dowolny admin
+  if (c.authorId && c.authorId !== admin.id) {
+    return fail("Możesz usunąć tylko własny komentarz");
+  }
+  await db.costComment.delete({ where: { id: commentId } });
+  revalidatePath(KOSZTY_PATH);
+  return ok("Komentarz usunięty");
 }
 
 export async function togglePaidAction(id: string): Promise<ActionResult> {
