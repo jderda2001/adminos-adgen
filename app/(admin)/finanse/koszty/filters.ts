@@ -16,16 +16,31 @@ export interface CostFilterParams {
   platnosc?: string;
 }
 
-/** Buduje warunek Prisma dla listy kosztów (bez kopii czekających na zatwierdzenie) */
-export function buildCostFilters(params: CostFilterParams): {
+/**
+ * Buduje warunek Prisma dla listy kosztów. Domyślnie bez kopii czekających na
+ * zatwierdzenie (needsConfirmation). Z `plannedFrom` pokazuje też ZAPLANOWANE
+ * kopie cykliczne z przyszłości (docDate ≥ plannedFrom) — do estymacji w tabeli
+ * per miesiąc; kopie bieżącego miesiąca zostają w kolejce „Do potwierdzenia".
+ */
+export function buildCostFilters(
+  params: CostFilterParams,
+  opts?: { plannedFrom?: Date }
+): {
   period: Period;
   where: Prisma.CostWhereInput;
 } {
   const period = resolvePeriod(params);
   const where: Prisma.CostWhereInput = {
-    needsConfirmation: false,
     docDate: { gte: period.from, lt: period.to },
   };
+  if (opts?.plannedFrom) {
+    where.OR = [
+      { needsConfirmation: false },
+      { needsConfirmation: true, docDate: { gte: opts.plannedFrom } },
+    ];
+  } else {
+    where.needsConfirmation = false;
+  }
   if (params.kategoria) where.categoryId = params.kategoria;
   if (params.przypisanie === "ogolny") where.clientId = null;
   else if (params.przypisanie) where.clientId = params.przypisanie;

@@ -102,6 +102,7 @@ export interface CostRow {
   note: string | null;
   attachmentName: string | null;
   recurringCostId: string | null;
+  planned?: boolean; // zaplanowana przyszła kopia cykliczna (estymacja, jeszcze nie do zapłaty)
 }
 
 /** Etykieta statusu płatności kosztu */
@@ -147,6 +148,10 @@ function statusTone(s: CostStatus) {
 function InlineStatus({ cost }: { cost: CostRow }) {
   const { pending, run } = useCostPatch();
   const status = costStatus(cost);
+  // zaplanowana przyszła kopia cykliczna — estymacja, jeszcze nie do zapłaty
+  if (cost.planned) {
+    return <StatusBadge tone="indigo">Planowany</StatusBadge>;
+  }
   return (
     <Select
       value={status}
@@ -386,7 +391,7 @@ export function CostsTable({
     let overdueGrossGr = 0;
     let overdueCount = 0;
     for (const c of filtered) {
-      if (c.paid) continue;
+      if (c.paid || c.planned) continue; // planowane przyszłe kopie to estymata, nie zobowiązanie
       unpaidGrossGr += c.grossGr;
       if (c.dueDate && daysOverdue(new Date(c.dueDate), today) > 0) {
         overdueGrossGr += c.grossGr;

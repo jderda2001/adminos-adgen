@@ -38,10 +38,16 @@ export default async function CostsPage({
     przypisanie: first(raw.przypisanie),
     platnosc: first(raw.platnosc),
   };
-  const { where } = buildCostFilters(filters);
+  // od 1. dnia następnego miesiąca zaczynają się „zaplanowane" kopie cykliczne
+  const today = todayUTC();
+  const nextMonthStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)
+  );
+  // tabela per miesiąc pokazuje też zaplanowane przyszłe kopie (estymacja)
+  const { where } = buildCostFilters(filters, { plannedFrom: nextMonthStart });
 
   // budżet reklamowy bieżącego miesiąca (plan marek vs wydane wg Mety) — banner
-  const adBudget = await getAdBudgetStatus(monthKey(todayUTC()));
+  const adBudget = await getAdBudgetStatus(monthKey(today));
 
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
@@ -51,7 +57,9 @@ export default async function CostsPage({
         orderBy: { docDate: "desc" },
       }),
       db.cost.findMany({
-        where: { needsConfirmation: true },
+        // kolejka „Do potwierdzenia" — tylko bieżący i wcześniejsze miesiące
+        // (przyszłe zaplanowane kopie widać w tabeli danego miesiąca, nie tutaj)
+        where: { needsConfirmation: true, docDate: { lt: nextMonthStart } },
         include: { category: true },
         orderBy: [{ supplierName: "asc" }, { docDate: "desc" }],
       }),
@@ -93,6 +101,7 @@ export default async function CostsPage({
     note: c.note,
     attachmentName: c.attachmentPath ? (c.attachmentName ?? c.attachmentPath) : null,
     recurringCostId: c.recurringCostId,
+    planned: c.needsConfirmation, // zaplanowana przyszła kopia cykliczna
   }));
 
   const pendingRows: PendingCostRow[] = pendingCosts.map((c) => ({
