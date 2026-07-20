@@ -1273,7 +1273,8 @@ export async function getBudgetVsActual(year: number): Promise<BudgetVsActualRow
 // ── Koszty cykliczne — leniwe generowanie miesięcznych kopii ────────
 
 // Ile najdalej wstecz dogenerowywać pominięte miesiące (miesiące bez wizyty w module)
-const RECURRING_BACKFILL_LIMIT = 12;
+const RECURRING_BACKFILL_LIMIT = 24; // bezpiecznik na runaway (backfill + horyzont)
+const RECURRING_LOOKAHEAD_MONTHS = 3; // kopie generowane z wyprzedzeniem (estymacja)
 
 /**
  * Tworzy kopie „do potwierdzenia" dla wszystkich aktywnych szablonów kosztów
@@ -1285,12 +1286,19 @@ const RECURRING_BACKFILL_LIMIT = 12;
 export async function generateRecurringCosts(): Promise<number> {
   const today = todayUTC();
   const currentPeriod = monthKey(today);
+  // horyzont: kopie powstają też na RECURRING_LOOKAHEAD_MONTHS miesięcy do
+  // przodu, żeby przyszłe miesiące w Kosztach pokazywały koszty cykliczne
+  // (estymacja). Kopie przyszłe mają needsConfirmation=true — liczą się w sumie
+  // strony Koszty, ale do Dashboardu/Rentowności wchodzą po potwierdzeniu.
+  let targetPeriod = currentPeriod;
+  for (let i = 0; i < RECURRING_LOOKAHEAD_MONTHS; i++) targetPeriod = nextMonthKey(targetPeriod);
+
   const templates = await db.recurringCost.findMany({
     where: {
       active: true,
       OR: [
         { lastGeneratedPeriod: null },
-        { lastGeneratedPeriod: { lt: currentPeriod } },
+        { lastGeneratedPeriod: { lt: targetPeriod } },
       ],
     },
   });
@@ -1304,18 +1312,19 @@ export async function generateRecurringCosts(): Promise<number> {
         active: true,
         lastGeneratedPeriod: t.lastGeneratedPeriod,
       },
-      data: { lastGeneratedPeriod: currentPeriod },
+      data: { lastGeneratedPeriod: targetPeriod },
     });
     if (claimed.count !== 1) continue;
 
-    // lista brakujących miesięcy: od następnego po lastGeneratedPeriod do bieżącego;
-    // endPeriod (raty/leasingi) ucina generowanie po ostatnim umownym miesiącu
+    // lista brakujących miesięcy: od następnego po lastGeneratedPeriod do
+    // targetPeriod (bieżący + horyzont); endPeriod (raty/leasingi) ucina
+    // generowanie po ostatnim umownym miesiącu
     const periods: string[] = [];
     let period = t.lastGeneratedPeriod
       ? nextMonthKey(t.lastGeneratedPeriod)
       : currentPeriod;
     while (
-      period <= currentPeriod &&
+      period <= targetPeriod &&
       (t.endPeriod === null || period <= t.endPeriod) &&
       periods.length < RECURRING_BACKFILL_LIMIT
     ) {

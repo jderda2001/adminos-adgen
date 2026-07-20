@@ -543,6 +543,25 @@ export async function confirmAllCostsAction(): Promise<ActionResult> {
 
 // ── Akcje: szablony kosztów cyklicznych ──────────────────────────────
 
+/**
+ * Usuwa NIEOPŁACONE kopie szablonu z przyszłych miesięcy (docDate od 1. dnia
+ * następnego miesiąca). Wołane przy edycji/wyłączeniu/usunięciu szablonu, żeby
+ * wygenerowane z wyprzedzeniem kopie nie zostały ze starą kwotą/terminem —
+ * generator odtworzy je z aktualnych danych przy następnym wejściu na Koszty.
+ * Zwraca cofnięty `lastGeneratedPeriod` (bieżący miesiąc), by generator wiedział,
+ * że przyszłość trzeba zbudować od nowa.
+ */
+async function deleteFutureRecurringCopies(recurringCostId: string): Promise<string> {
+  const today = todayUTC();
+  const nextMonthStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)
+  );
+  await db.cost.deleteMany({
+    where: { recurringCostId, paid: false, docDate: { gte: nextMonthStart } },
+  });
+  return monthKey(today);
+}
+
 const recurringSchema = z.object({
   net: z.string().trim().min(1, "Podaj kwotę netto"),
   dueDayOfMonth: z.string().trim().min(1, "Podaj dzień miesiąca"),
@@ -583,9 +602,19 @@ export async function updateRecurringCostAction(
   const existing = await db.recurringCost.findUnique({ where: { id } });
   if (!existing) return fail("Szablon nie istnieje");
 
+  // przyszłe kopie odtworzą się z nowej kwoty/terminu przy następnym wejściu
+  const currentPeriod = await deleteFutureRecurringCopies(id);
   await db.recurringCost.update({
     where: { id },
-    data: { netGr, dueDayOfMonth: day, endPeriod },
+    data: {
+      netGr,
+      dueDayOfMonth: day,
+      endPeriod,
+      lastGeneratedPeriod:
+        existing.lastGeneratedPeriod && existing.lastGeneratedPeriod > currentPeriod
+          ? currentPeriod
+          : existing.lastGeneratedPeriod,
+    },
   });
   revalidatePath(KOSZTY_PATH);
   return ok("Szablon został zaktualizowany");
@@ -599,12 +628,27 @@ export async function toggleRecurringActiveAction(
   const existing = await db.recurringCost.findUnique({ where: { id } });
   if (!existing) return fail("Szablon nie istnieje");
 
-  await db.recurringCost.update({ where: { id }, data: { active } });
+  // wyłączenie sprząta kopie wygenerowane z wyprzedzeniem (nieopłacone)
+  if (!active) {
+    const currentPeriod = await deleteFutureRecurringCopies(id);
+    await db.recurringCost.update({
+      where: { id },
+      data: {
+        active,
+        lastGeneratedPeriod:
+          existing.lastGeneratedPeriod && existing.lastGeneratedPeriod > currentPeriod
+            ? currentPeriod
+            : existing.lastGeneratedPeriod,
+      },
+    });
+  } else {
+    await db.recurringCost.update({ where: { id }, data: { active } });
+  }
   revalidatePath(KOSZTY_PATH);
   return ok(
     active
-      ? "Szablon aktywny — kopie będą generowane co miesiąc"
-      : "Szablon wyłączony — generowanie zatrzymane"
+      ? "Szablon aktywny — kopie będą generowane co miesiąc (z 3-mies. wyprzedzeniem)"
+      : "Szablon wyłączony — generowanie zatrzymane, przyszłe kopie usunięte"
   );
 }
 
@@ -615,10 +659,12 @@ export async function deleteRecurringCostAction(
   const existing = await db.recurringCost.findUnique({ where: { id } });
   if (!existing) return fail("Szablon nie istnieje");
 
-  // powiązane koszty zostają (recurringCostId → null przez onDelete: SetNull)
+  // przyszłe nieopłacone kopie znikają; historyczne koszty zostają
+  // (recurringCostId → null przez onDelete: SetNull)
+  await deleteFutureRecurringCopies(id);
   await db.recurringCost.delete({ where: { id } });
   revalidatePath(KOSZTY_PATH);
-  return ok("Szablon został usunięty");
+  return ok("Szablon został usunięty (razem z przyszłymi kopiami)");
 }
 
 // ── Import CSV kosztów (backfill historyczny) ────────────────────────
