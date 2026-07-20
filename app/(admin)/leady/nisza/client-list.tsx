@@ -1,11 +1,10 @@
 "use client";
 
-// Lista klientów na stronie niszy: pasek postępu dowiezienia, inline-edytowalne
-// „dowiezione" (przypisujecie leady ręcznie) i „paczka dostarczona" (ustawia
-// dowiezione = całe zobowiązanie: kontrakt + dług z poprzednich miesięcy).
+// Lista klientów na stronie niszy: pasek postępu dowiezienia + inline-edytowalne
+// „dowiezione" (przypisujecie leady ręcznie — jedyne źródło prawdy o dostawie).
 
 import { useState, useTransition } from "react";
-import { Check, PackageCheck, Pencil } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -137,19 +136,6 @@ function ClientRow({ month, row }: { month: string; row: NicheClientRow }) {
           <StatusBadge tone="green" dot>
             rozliczone
           </StatusBadge>
-        )}
-
-        {row.balance > 0 && (
-          <Button
-            size="xs"
-            variant="ghost"
-            className="ml-auto text-primary"
-            disabled={pending}
-            onClick={() => commit(String(row.owed))}
-            title="Ustaw dowiezione = całe zobowiązanie (kontrakt + dług)"
-          >
-            <PackageCheck data-icon="inline-start" /> paczka dostarczona
-          </Button>
         )}
       </div>
     </div>
