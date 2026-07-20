@@ -501,11 +501,22 @@ export async function toggleDelayedAction(id: string): Promise<ActionResult> {
 
 // ── Akcje: potwierdzanie kopii cyklicznych ───────────────────────────
 
+/** Pierwszy dzień następnego miesiąca (UTC) — granica „przyszłych" kopii. */
+function nextMonthStartUTC(): Date {
+  const t = todayUTC();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 1));
+}
+
 export async function confirmCostAction(id: string): Promise<ActionResult> {
   await requireAdmin();
   const existing = await db.cost.findUnique({ where: { id } });
   if (!existing) return fail("Koszt nie istnieje");
   if (!existing.needsConfirmation) return fail("Ten koszt jest już zatwierdzony");
+  // przyszłe kopie to estymata („Planowany") — potwierdzasz je, gdy dany miesiąc
+  // stanie się bieżący (wtedy trafią do kolejki „Do potwierdzenia")
+  if (existing.docDate >= nextMonthStartUTC()) {
+    return fail("To zaplanowany koszt przyszłego miesiąca — potwierdzisz go, gdy nadejdzie ten miesiąc");
+  }
 
   await db.cost.update({ where: { id }, data: { needsConfirmation: false } });
   revalidatePath(KOSZTY_PATH);
@@ -528,8 +539,10 @@ export async function rejectCostAction(id: string): Promise<ActionResult> {
 
 export async function confirmAllCostsAction(): Promise<ActionResult> {
   await requireAdmin();
+  // tylko bieżący i wcześniejsze miesiące — przyszłe kopie („Planowany")
+  // zostają estymatą do czasu, aż ich miesiąc nadejdzie
   const updated = await db.cost.updateMany({
-    where: { needsConfirmation: true },
+    where: { needsConfirmation: true, docDate: { lt: nextMonthStartUTC() } },
     data: { needsConfirmation: false },
   });
   revalidatePath(KOSZTY_PATH);
