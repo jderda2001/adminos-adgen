@@ -4,7 +4,7 @@ import { requireAdmin, isAuthDisabled } from "@/lib/auth";
 import {
   generateRecurringCosts,
   getAdBudgetStatus,
-  getPreviousMonthVat,
+  getVatForMonth,
 } from "@/lib/reports";
 import { monthKey } from "@/lib/periods";
 import { formatMonth, todayUTC } from "@/lib/format";
@@ -48,13 +48,17 @@ export default async function CostsPage({
     Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)
   );
   // tabela per miesiąc pokazuje też zaplanowane przyszłe kopie (estymacja)
-  const { where } = buildCostFilters(filters, { plannedFrom: nextMonthStart });
+  const { where, period } = buildCostFilters(filters, { plannedFrom: nextMonthStart });
 
   // budżet reklamowy bieżącego miesiąca (plan marek vs wydane wg Mety) — banner
   const adBudget = await getAdBudgetStatus(monthKey(today));
-  // VAT za poprzedni miesiąc (odłożony, płatny do US w tym miesiącu) — kafelek
-  const prevVatRaw = await getPreviousMonthVat();
-  const prevVat = { monthLabel: formatMonth(prevVatRaw.month), dueGr: prevVatRaw.dueGr };
+  // VAT idzie za WYBRANYM okresem: miesiąc PRZED początkiem okresu (przeglądając
+  // sierpień widzisz VAT za lipiec — kwotę odłożoną, płatną do US w tym miesiącu)
+  const vatMonth = monthKey(
+    new Date(Date.UTC(period.from.getUTCFullYear(), period.from.getUTCMonth() - 1, 1))
+  );
+  const vatRaw = await getVatForMonth(vatMonth);
+  const prevVat = { monthLabel: formatMonth(vatMonth), dueGr: vatRaw.dueGr };
 
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
