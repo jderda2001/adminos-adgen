@@ -182,6 +182,72 @@ export async function deleteDeliveryAction(id: string): Promise<ActionResult> {
   return ok("Dostawa usunięta");
 }
 
+// Ustawia łączną liczbę dowiezionych leadów per klient × wertykal × miesiąc
+// (edycja inline w „Dostawy vs kontrakt"). Liczbę wpisujecie ręcznie, bo leady
+// przypisujecie ręcznie — dlatego kolapsujemy wszystkie wpisy tej pary do jednego
+// autorytatywnego wiersza (aktualizujemy pierwszy, resztę usuwamy). 0 = wyzeruj
+// (wiersz zostaje, żeby auto-przeniesienie z poprzedniego miesiąca go nie odtworzyło).
+const setDeliveredSchema = z.object({
+  period: periodSchema,
+  clientId: z.string().min(1, "Wybierz klienta"),
+  vertical: verticalSchema,
+  leads: z.string().trim().min(1, "Podaj liczbę leadów"),
+});
+
+export async function setDeliveredAction(input: {
+  period: string;
+  clientId: string;
+  vertical: string;
+  leads: string;
+}): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = setDeliveredSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Nieprawidłowe dane");
+  }
+  const d = parsed.data;
+
+  const leadsCount = Number(d.leads.replace(/\s/g, ""));
+  if (!Number.isInteger(leadsCount) || leadsCount < 0) {
+    return fail("Liczba dowiezionych musi być całkowita (0 lub więcej)");
+  }
+  const client = await db.client.findUnique({ where: { id: d.clientId } });
+  if (!client) return fail("Wybrany klient nie istnieje");
+  if (!(await isKnownVertical(d.vertical))) return fail("Nieznany wertykal");
+
+  const existing = await db.leadDelivery.findMany({
+    where: { period: d.period, clientId: d.clientId, vertical: d.vertical },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+
+  if (existing.length === 0) {
+    await db.leadDelivery.create({
+      data: {
+        period: d.period,
+        clientId: d.clientId,
+        vertical: d.vertical,
+        brandId: null, // mix — koszt liczony po średniej CPL wertykalu
+        leadsCount,
+        estimated: false,
+      },
+    });
+  } else {
+    // aktualizuj najstarszy wpis (zachowuje przypisaną markę), usuń pozostałe
+    const [keep, ...rest] = existing;
+    await db.leadDelivery.update({
+      where: { id: keep.id },
+      data: { leadsCount, estimated: false },
+    });
+    if (rest.length > 0) {
+      await db.leadDelivery.deleteMany({ where: { id: { in: rest.map((r) => r.id) } } });
+    }
+  }
+
+  revalidateAll();
+  return ok("Zapisano dowiezione");
+}
+
 // ── Marki wewnętrzne ─────────────────────────────────────────────────
 
 const brandNameSchema = z

@@ -1111,6 +1111,7 @@ export interface LeadFulfillment {
   statuses: LeadDeliveryStatusRow[]; // per klient × wertykal (kontrakt vs dowiezione + dług)
   plan: FulfillmentPlan; // brakujące × CPL → needed spend + wzrost budżetu per wertykal
   cplByVertical: Record<string, number | null>; // CPL z ostatniego okresu
+  generatedByVertical: Record<string, number>; // leady WYGENEROWANE w tym miesiącu (Σ kampanii)
   spentTotalGr: number; // Σ wydane w Mecie w tym miesiącu
   daysLeft: number;
 }
@@ -1126,6 +1127,7 @@ async function computeFulfillment(month: string): Promise<{
   statuses: LeadDeliveryStatusRow[];
   plan: FulfillmentPlan;
   cplByVertical: Record<string, number | null>;
+  generatedByVertical: Record<string, number>;
   spentTotalGr: number;
   daysLeft: number;
 }> {
@@ -1175,6 +1177,7 @@ async function computeFulfillment(month: string): Promise<{
   // CPL trailing i spend bieżącego miesiąca per wertykal
   const trail = new Map<string, { spendGr: number; leadsCount: number }>();
   const spentByVertical: Record<string, number> = {};
+  const generatedByVertical: Record<string, number> = {};
   let spentTotalGr = 0;
   for (const c of trailingCampaigns) {
     const t = trail.get(c.vertical) ?? { spendGr: 0, leadsCount: 0 };
@@ -1183,6 +1186,7 @@ async function computeFulfillment(month: string): Promise<{
     trail.set(c.vertical, t);
     if (c.period === month) {
       spentByVertical[c.vertical] = (spentByVertical[c.vertical] ?? 0) + c.spendGr;
+      generatedByVertical[c.vertical] = (generatedByVertical[c.vertical] ?? 0) + c.leadsCount;
       spentTotalGr += c.spendGr;
     }
   }
@@ -1190,7 +1194,14 @@ async function computeFulfillment(month: string): Promise<{
   for (const [v, t] of trail) cplByVertical[v] = t.leadsCount > 0 ? Math.round(t.spendGr / t.leadsCount) : null;
 
   const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical);
-  return { statuses, plan, cplByVertical, spentTotalGr, daysLeft: daysLeftInMonth(month, todayUTC()) };
+  return {
+    statuses,
+    plan,
+    cplByVertical,
+    generatedByVertical,
+    spentTotalGr,
+    daysLeft: daysLeftInMonth(month, todayUTC()),
+  };
 }
 
 /** Pełna realizacja kontraktów leadowych do UI (dostawy + estymacja). */
@@ -1201,6 +1212,7 @@ export async function getLeadFulfillment(month: string): Promise<LeadFulfillment
     statuses: f.statuses,
     plan: f.plan,
     cplByVertical: f.cplByVertical,
+    generatedByVertical: f.generatedByVertical,
     spentTotalGr: f.spentTotalGr,
     daysLeft: f.daysLeft,
   };

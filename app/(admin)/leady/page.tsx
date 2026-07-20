@@ -23,7 +23,7 @@ import { CampaignsCard } from "./campaigns-card";
 import { ReconciliationCard } from "./reconciliation-card";
 import { MetaSyncCard } from "./meta-sync-card";
 import { BrandCards } from "./brand-cards";
-import { FulfillmentCard, type FulfillmentRow } from "./fulfillment-card";
+import { FulfillmentCard, type FulfillmentRow, type VerticalSection } from "./fulfillment-card";
 import { FulfillmentPlanCard } from "./fulfillment-plan-card";
 import { BrandsDialog, type BrandRow } from "./brands-dialog";
 import { VerticalsDialog } from "./verticals-dialog";
@@ -105,26 +105,51 @@ export default async function LeadyPage({
 
   const unassignedGr = data.bookedAdCostsGr - data.totals.assignedCostGr;
 
-  // dostawy vs kontrakt (kontrakt z Przychodów, dług narastająco) + koszt leadów
-  const fulfillmentRows: FulfillmentRow[] = fulfillment.statuses
-    .map((s) => {
-      const cpl = fulfillment.cplByVertical[s.vertical] ?? null;
+  // dostawy vs kontrakt pogrupowane po WERTYKALU (niszy): pula leadów
+  // (wygenerowane w Mecie → przypisane klientom → nieprzypisane) + wiersze klientów
+  // (kontrakt z Przychodów, dług narastająco, koszt = dowiezione × CPL wertykalu)
+  const rowsByVertical = new Map<string, FulfillmentRow[]>();
+  for (const s of fulfillment.statuses) {
+    const cpl = fulfillment.cplByVertical[s.vertical] ?? null;
+    const row: FulfillmentRow = {
+      clientId: s.clientId,
+      clientName: s.clientName,
+      vertical: s.vertical,
+      owed: s.owed,
+      delivered: s.deliveredThisMonth,
+      balance: s.balance,
+      costGr: cpl !== null ? Math.round(s.deliveredThisMonth * cpl) : 0,
+    };
+    const arr = rowsByVertical.get(s.vertical) ?? [];
+    arr.push(row);
+    rowsByVertical.set(s.vertical, arr);
+  }
+  // wertykały: te z kontraktem/dostawą + te, które coś wygenerowały (nawet bez kontraktów)
+  const sectionVerticals = new Set<string>([
+    ...rowsByVertical.keys(),
+    ...Object.keys(fulfillment.generatedByVertical),
+  ]);
+  const fulfillmentSections: VerticalSection[] = [...sectionVerticals]
+    .map((vertical) => {
+      const rows = (rowsByVertical.get(vertical) ?? []).sort(
+        (a, b) => b.balance - a.balance || a.clientName.localeCompare(b.clientName, "pl")
+      );
+      const assigned = rows.reduce((n, r) => n + r.delivered, 0);
+      const generated = fulfillment.generatedByVertical[vertical] ?? 0;
       return {
-        clientId: s.clientId,
-        clientName: s.clientName,
-        vertical: s.vertical,
-        owed: s.owed,
-        delivered: s.deliveredThisMonth,
-        balance: s.balance,
-        costGr: cpl !== null ? Math.round(s.deliveredThisMonth * cpl) : 0,
+        vertical,
+        cplGr: fulfillment.cplByVertical[vertical] ?? null,
+        generated,
+        assigned,
+        unassigned: generated - assigned,
+        rows,
       };
     })
-    .sort(
-      (a, b) =>
-        b.balance - a.balance ||
-        a.clientName.localeCompare(b.clientName, "pl") ||
-        a.vertical.localeCompare(b.vertical, "pl")
-    );
+    .sort((a, b) => {
+      const owedA = a.rows.reduce((n, r) => n + Math.max(0, r.balance), 0);
+      const owedB = b.rows.reduce((n, r) => n + Math.max(0, r.balance), 0);
+      return owedB - owedA || b.generated - a.generated || a.vertical.localeCompare(b.vertical, "pl");
+    });
 
   // wertykale z użyteczną kampanią (leady>0) — dla dialogu dostawy (wycena CPL)
   const verticalsWithCampaign = [
@@ -170,8 +195,6 @@ export default async function LeadyPage({
           verticals={activeVerticals}
         />
 
-        <BrandCards rows={brandEcon.rows} />
-
         {estimatedCount > 0 && (
           <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             {estimatedCount}{" "}
@@ -199,7 +222,7 @@ export default async function LeadyPage({
         <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
           <FulfillmentCard
             month={month}
-            rows={fulfillmentRows}
+            sections={fulfillmentSections}
             brands={brands}
             clients={clients}
             verticals={activeVerticals}
@@ -210,6 +233,21 @@ export default async function LeadyPage({
             <FulfillmentPlanCard plan={fulfillment.plan} />
           </div>
         </div>
+
+        <details className="group rounded-xl border bg-card shadow-[var(--shadow-card)]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <span>
+              Marki wewnętrzne
+              <span className="ml-2 font-normal">
+                przychód, marża i CPL per marka · klik w kartę → szczegóły
+              </span>
+            </span>
+            <ChevronDown className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="border-t p-4">
+            <BrandCards rows={brandEcon.rows} />
+          </div>
+        </details>
 
         <details className="group rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
