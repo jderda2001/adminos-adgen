@@ -150,9 +150,14 @@ function statusTone(s: CostStatus) {
 function InlineStatus({ cost }: { cost: CostRow }) {
   const { pending, run } = useCostPatch();
   const status = costStatus(cost);
-  // zaplanowana przyszła kopia cykliczna — estymacja, jeszcze nie do zapłaty
+  // zaplanowana przyszła kopia cykliczna — estymacja, jeszcze nie do zapłaty.
+  // h-7 + px-1 = ta sama wysokość i wcięcie co dropdown statusu (równy układ)
   if (cost.planned) {
-    return <StatusBadge tone="indigo">Planowany</StatusBadge>;
+    return (
+      <div className="flex h-7 items-center px-1">
+        <StatusBadge tone="indigo">Planowany</StatusBadge>
+      </div>
+    );
   }
   return (
     <Select
@@ -393,9 +398,12 @@ export function CostsTable({
     let overdueGrossGr = 0;
     let overdueCount = 0;
     for (const c of filtered) {
-      if (c.paid || c.planned) continue; // planowane przyszłe kopie to estymata, nie zobowiązanie
+      if (c.paid) continue;
+      // „Do zapłaty" = cały niezapłacony wypływ okresu (w tym planowane kopie
+      // cykliczne — to realny przyszły wydatek). „Zaległe" liczy tylko po
+      // terminie i NIE dotyczy planowanych (ich termin jest w przyszłości).
       unpaidGrossGr += c.grossGr;
-      if (c.dueDate && daysOverdue(new Date(c.dueDate), today) > 0) {
+      if (!c.planned && c.dueDate && daysOverdue(new Date(c.dueDate), today) > 0) {
         overdueGrossGr += c.grossGr;
         overdueCount += 1;
       }
