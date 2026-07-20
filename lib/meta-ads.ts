@@ -4,19 +4,33 @@ import "server-only";
 // leadów per kampania z CAŁEGO portfolio (wszystkie konta widoczne dla tokena),
 // więc równoległe kampanie na wielu kontach nie są problemem.
 //
-// Sekrety wyłącznie z env (nigdy repo):
-//   META_ACCESS_TOKEN         — token System User (ads_read + business_management)
+// Token: z bazy (ustawienie meta_access_token — z OAuth „Połącz z FB" lub wklejony
+// ręcznie w Ustawieniach), a w razie braku z env META_ACCESS_TOKEN. Poświadczenia
+// nigdy nie trafiają do repo (DB jest gitignored). Pozostała konfiguracja z env:
 //   META_API_VERSION          — np. "v21.0" (domyślnie)
 //   META_AD_ACCOUNT_ALLOWLIST — opcjonalnie CSV act_… (ogranicz do wybranych kont)
 //   META_LEAD_ACTION_TYPES    — CSV akcji liczonych jako lead (domyślnie Lead Ads)
 //   META_MOCK=1               — wymuś dane testowe nawet przy obecnym tokenie
 //
 // Bez tokena → tryb MOCK (deterministyczne dane), żeby moduł działał do czasu
-// wgrania realnego klucza na produkcji.
+// podłączenia konta Meta.
+
+import { getSetting } from "./settings";
 
 const GRAPH = "https://graph.facebook.com";
 
 const DEFAULT_LEAD_ACTIONS = ["lead", "onsite_conversion.lead_grouped"];
+
+/**
+ * Token dostępu Meta: najpierw z bazy (ustawiony przez OAuth „Połącz z FB" lub
+ * ręcznie w Ustawieniach), a w razie braku — z env (wdrożenia z tokenem w .env).
+ */
+export async function metaAccessToken(): Promise<string | null> {
+  const fromDb = (await getSetting("meta_access_token")).trim();
+  if (fromDb) return fromDb;
+  const fromEnv = process.env.META_ACCESS_TOKEN?.trim();
+  return fromEnv || null;
+}
 
 export interface MetaAdAccount {
   id: string; // "act_<n>"
@@ -35,12 +49,13 @@ export interface MetaCampaignInsight {
   currency: string;
 }
 
-export function isMetaConfigured(): boolean {
-  return Boolean(process.env.META_ACCESS_TOKEN);
+export async function isMetaConfigured(): Promise<boolean> {
+  return Boolean(await metaAccessToken());
 }
 
-export function isMetaMock(): boolean {
-  return process.env.META_MOCK === "1" || !isMetaConfigured();
+export async function isMetaMock(): Promise<boolean> {
+  if (process.env.META_MOCK === "1") return true;
+  return !(await metaAccessToken());
 }
 
 function apiVersion(): string {
@@ -81,8 +96,8 @@ function spendToGrosze(spend: unknown): number {
 }
 
 async function graphGet(path: string, params: Record<string, string>): Promise<unknown> {
-  const token = process.env.META_ACCESS_TOKEN;
-  if (!token) throw new Error("Brak META_ACCESS_TOKEN");
+  const token = await metaAccessToken();
+  if (!token) throw new Error("Brak tokena Meta (podłącz konto w Ustawieniach)");
   const url = new URL(`${GRAPH}/${apiVersion()}/${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("access_token", token);
@@ -112,7 +127,7 @@ async function graphGetAll(path: string, params: Record<string, string>): Promis
 
 /** Wszystkie konta reklamowe widoczne dla tokena (portfolio), po filtrze allowlist. */
 export async function fetchAdAccounts(): Promise<MetaAdAccount[]> {
-  if (isMetaMock()) return mockAdAccounts();
+  if (await isMetaMock()) return mockAdAccounts();
   const rows = await graphGetAll("me/adaccounts", {
     fields: "account_id,name,currency,account_status",
     limit: "200",
@@ -136,7 +151,7 @@ export async function fetchAdAccounts(): Promise<MetaAdAccount[]> {
  * Zwraca też kampanie z zerowymi wynikami (do mapowania).
  */
 export async function fetchCampaignInsights(month: string): Promise<MetaCampaignInsight[]> {
-  if (isMetaMock()) return mockInsights(month);
+  if (await isMetaMock()) return mockInsights(month);
 
   const { from, to } = monthBounds(month);
   const timeRange = JSON.stringify({ since: from, until: to });

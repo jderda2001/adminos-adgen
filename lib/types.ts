@@ -119,6 +119,12 @@ export const SETTING_DEFAULTS = {
   boa_podatki_pct: "3",
   // codzienny automatyczny sync kampanii z Meta (cron) — "1" wł. / "0" wył.
   meta_autosync_enabled: "0",
+  // Poświadczenia Meta (trzymane w bazie, nie w repo — DB jest gitignored).
+  // Ustawiane przez UI (Ustawienia → Integracje) i przepływ OAuth „Połącz z FB".
+  meta_app_id: "", // ID aplikacji Meta (jawne, używane w URL logowania)
+  meta_app_secret: "", // sekret aplikacji (server-only, nigdy do klienta)
+  meta_access_token: "", // token dostępu (z OAuth lub wklejony ręcznie; fallback: env)
+  meta_oauth_base_url: "", // bazowy URL HTTPS do redirectu OAuth (puste = z żądania)
 } as const;
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 

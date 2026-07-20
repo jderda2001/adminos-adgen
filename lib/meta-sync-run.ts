@@ -96,7 +96,7 @@ export async function runMetaSync(month: string): Promise<MetaSyncSummary> {
       monthsUpserted,
       unmappedCampaigns: agg.unmappedCampaignIds.length,
       unmappedSpendGr: agg.unmappedSpendGr,
-      mock: isMetaMock(),
+      mock: await isMetaMock(),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Nieznany błąd";

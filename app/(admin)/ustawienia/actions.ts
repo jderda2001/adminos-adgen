@@ -66,6 +66,51 @@ export async function saveMetaAutosyncAction(
   );
 }
 
+const metaCredsSchema = z.object({
+  appId: z.string().trim().max(64, "Zbyt długie App ID"),
+  appSecret: z.string().trim().max(128, "Zbyt długi App Secret"),
+  baseUrl: z
+    .string()
+    .trim()
+    .max(256)
+    .refine((v) => v === "" || /^https:\/\/.+/.test(v), "Adres musi zaczynać się od https://"),
+});
+
+/**
+ * Zapisuje poświadczenia aplikacji Meta (App ID, App Secret) i adres HTTPS do
+ * OAuth. App Secret jest write-only: puste pole = zostaw dotychczasowy.
+ */
+export async function saveMetaCredentialsAction(
+  formData: FormData
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = metaCredsSchema.safeParse({
+    appId: formData.get("appId") ?? "",
+    appSecret: formData.get("appSecret") ?? "",
+    baseUrl: formData.get("baseUrl") ?? "",
+  });
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Nieprawidłowe dane");
+  }
+  const d = parsed.data;
+
+  await setSetting("meta_app_id", d.appId);
+  await setSetting("meta_oauth_base_url", d.baseUrl);
+  if (d.appSecret) await setSetting("meta_app_secret", d.appSecret);
+
+  revalidatePath("/ustawienia");
+  return ok("Zapisano dane aplikacji Meta");
+}
+
+/** Rozłącza konto Meta (czyści zapisany token; kolejny sync wróci do trybu mock). */
+export async function disconnectMetaAction(): Promise<ActionResult> {
+  await requireAdmin();
+  await setSetting("meta_access_token", "");
+  revalidatePath("/ustawienia");
+  revalidatePath("/leady");
+  return ok("Rozłączono konto Meta");
+}
+
 // ── Cele BOA (docelowy podział przychodu) ────────────────────────────
 
 const pctField = z.coerce

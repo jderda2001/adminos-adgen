@@ -837,15 +837,17 @@ export interface MetaStatus {
 }
 
 export async function getMetaStatus(): Promise<MetaStatus> {
-  const [last, unmappedCount] = await Promise.all([
+  const [last, unmappedCount, configured, mock] = await Promise.all([
     db.metaSyncRun.findFirst({ orderBy: { ranAt: "desc" } }),
     db.metaCampaignMap.count({
       where: { ignored: false, OR: [{ brandId: null }, { vertical: null }] },
     }),
+    isMetaConfigured(),
+    isMetaMock(),
   ]);
   return {
-    configured: isMetaConfigured(),
-    mock: isMetaMock(),
+    configured,
+    mock,
     lastRun: last
       ? {
           ranAt: last.ranAt.toISOString(),

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
@@ -12,9 +13,14 @@ import { IntegrationsCard } from "./integrations-card";
 
 export const metadata: Metadata = { title: "Ustawienia" };
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ meta?: string; msg?: string }>;
+}) {
   await requireAdmin();
 
+  const sp = await searchParams;
   const [settings, categories] = await Promise.all([
     getSettings(),
     db.costCategory.findMany({
@@ -32,6 +38,16 @@ export default async function SettingsPage() {
     isAdBudget: c.isAdBudget,
     isDeferred: c.isDeferred,
   }));
+
+  // adres powrotny OAuth: z ustawienia lub z nagłówków żądania (proxy)
+  const h = await headers();
+  const configuredBase = settings.meta_oauth_base_url.trim();
+  const oauthBase = (
+    configuredBase ||
+    `${h.get("x-forwarded-proto") ?? "https"}://${h.get("x-forwarded-host") ?? h.get("host") ?? ""}`
+  ).replace(/\/+$/, "");
+  const metaCallbackUrl = `${oauthBase}/api/meta/oauth/callback`;
+  const metaConnected = await isMetaConfigured();
 
   return (
     <>
@@ -58,8 +74,14 @@ export default async function SettingsPage() {
           account={settings.company_account}
         />
         <IntegrationsCard
+          connected={metaConnected}
+          appId={settings.meta_app_id}
+          hasSecret={Boolean(settings.meta_app_secret) || Boolean(process.env.META_APP_SECRET)}
+          baseUrl={settings.meta_oauth_base_url}
+          callbackUrl={metaCallbackUrl}
           metaAutosyncEnabled={settings.meta_autosync_enabled === "1"}
-          metaConfigured={isMetaConfigured()}
+          flash={sp.meta ?? null}
+          flashMsg={sp.msg ?? null}
         />
         <CategoriesCard categories={categoryRows} />
       </div>
