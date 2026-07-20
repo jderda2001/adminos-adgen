@@ -92,44 +92,60 @@ function AccountRow({
   row,
   state,
   brands,
+  mixedHint,
   onChange,
 }: {
   row: MetaAccountRowUi;
   state: AccState;
   brands: BrandOption[];
+  /** heurystyka: nazwa konta/kampanii wskazuje na wiele marek */
+  mixedHint: boolean;
   onChange: (value: string) => void;
 }) {
   const value = state.ignored ? CLIENT : state.mixed ? MIXED : state.brandId ?? NONE;
+  const showHint = mixedHint && !state.ignored && !state.mixed;
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-xl border px-3.5 py-2.5",
+        "rounded-xl border px-3.5 py-2.5",
         accDecided(state)
           ? "bg-card"
           : "border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{row.adAccountName}</div>
-        <div className="text-xs text-muted-foreground">
-          {row.campaignCount} {pluralPl(row.campaignCount, "kampania", "kampanie", "kampanii")}
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">{row.adAccountName}</div>
+          <div className="text-xs text-muted-foreground">
+            {row.campaignCount} {pluralPl(row.campaignCount, "kampania", "kampanie", "kampanii")}
+          </div>
         </div>
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger size="sm" className="w-56 shrink-0">
+            <SelectValue placeholder="Czyje to konto?" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>— czyje to konto? —</SelectItem>
+            <SelectItem value={MIXED}>Wiele marek na tym koncie</SelectItem>
+            <SelectItem value={CLIENT}>Konto klienta — pomiń</SelectItem>
+            {brands.map((b) => (
+              <SelectItem key={b.id} value={b.id}>
+                tylko {b.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger size="sm" className="w-52 shrink-0">
-          <SelectValue placeholder="Czyje to konto?" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={NONE}>— czyje to konto? —</SelectItem>
-          {brands.map((b) => (
-            <SelectItem key={b.id} value={b.id}>
-              {b.name}
-            </SelectItem>
-          ))}
-          <SelectItem value={MIXED}>Wiele marek (mieszane)</SelectItem>
-          <SelectItem value={CLIENT}>Konto klienta — pomiń</SelectItem>
-        </SelectContent>
-      </Select>
+      {showHint && (
+        <button
+          type="button"
+          onClick={() => onChange(MIXED)}
+          className="mt-2 flex w-full items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1.5 text-left text-xs font-medium text-primary hover:bg-primary/15"
+        >
+          <Sparkles className="size-3.5 shrink-0" />
+          Widzę tu kampanie kilku marek — kliknij, aby ustawić „Wiele marek"
+        </button>
+      )}
     </div>
   );
 }
@@ -335,6 +351,28 @@ export function MetaMappingDialog({
 
   const accountsPending = accounts.filter((a) => !accDecided(getAcc(a))).length;
 
+  // heurystyka „konto wygląda na wielomarkowe": ≥2 marki w nazwie konta
+  // (np. „adGen | ReBalancer | Sun Era…") lub ≥2 różne marki wykryte
+  // w nazwach jego kampanii
+  const mixedHints = useMemo(() => {
+    const byAcc = new Map<string, Set<string>>();
+    for (const c of campaigns) {
+      const b = suggestBrand(c.metaCampaignName, brands);
+      if (!b) continue;
+      const set = byAcc.get(c.adAccountId) ?? new Set<string>();
+      set.add(b.id);
+      byAcc.set(c.adAccountId, set);
+    }
+    const hints = new Set<string>();
+    for (const a of accounts) {
+      const n = norm(a.adAccountName);
+      const inName = brands.filter((b) => n.includes(norm(b.name))).length;
+      const inCampaigns = byAcc.get(a.adAccountId)?.size ?? 0;
+      if (inName >= 2 || inCampaigns >= 2) hints.add(a.adAccountId);
+    }
+    return hints;
+  }, [accounts, campaigns, brands]);
+
   // krok 2: kampanie kont z marką lub mieszanych
   const step2Campaigns = campaigns.filter((c) => {
     const acc = getAccByCampaign(c);
@@ -462,6 +500,7 @@ export function MetaMappingDialog({
                   row={a}
                   state={getAcc(a)}
                   brands={brands}
+                  mixedHint={mixedHints.has(a.adAccountId)}
                   onChange={(v) => changeAccount(a, v)}
                 />
               ))}
