@@ -84,7 +84,9 @@ export function BrandCards({
               <div className="mb-2 truncate text-xs text-muted-foreground">
                 {r.accountNames.length > 0
                   ? `konta: ${r.accountNames.join(", ")}`
-                  : "brak przypisanego konta reklamowego"}
+                  : r.leadsCount > 0 || r.spendGr > 0
+                    ? "kampanie z kont wspólnych (mieszanych)"
+                    : "brak przypisanego konta reklamowego"}
               </div>
 
               <div className="text-2xl font-semibold tabular-nums">

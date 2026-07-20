@@ -119,4 +119,32 @@ describe("aggregateMetaToCampaignMonths", () => {
     expect(r.rows).toEqual([]);
     expect(r.unmappedSpendGr).toBe(100_000);
   });
+
+  it("konto mieszane: marka per kampania, różne marki z jednego konta", () => {
+    const insights = [
+      ins("c1", 100_000, 10, "act_mix"),
+      ins("c2", 200_000, 20, "act_mix"),
+    ];
+    const mappings = [map("c1", "brandA", "SKD"), map("c2", "brandB", "OZE")];
+    const mixedAcc = { adAccountId: "act_mix", brandId: null, mixed: true, ignored: false };
+    const r = aggregateMetaToCampaignMonths(insights, mappings, [mixedAcc]);
+    expect(r.rows).toHaveLength(2);
+    expect(r.rows.map((x) => x.brandId).sort()).toEqual(["brandA", "brandB"]);
+    expect(r.unmappedSpendGr).toBe(0);
+  });
+
+  it("konto mieszane: kampania z wertykalem, ale bez marki → niezmapowana", () => {
+    const insights = [ins("c1", 100_000, 10, "act_mix")];
+    const mixedAcc = { adAccountId: "act_mix", brandId: null, mixed: true, ignored: false };
+    const r = aggregateMetaToCampaignMonths(insights, [map("c1", null, "SKD")], [mixedAcc]);
+    expect(r.rows).toEqual([]);
+    expect(r.unmappedSpendGr).toBe(100_000);
+  });
+
+  it("konto mieszane z ustawionym brandId konta: brandId konta NIE dziedziczy się", () => {
+    const insights = [ins("c1", 100_000, 10, "act_mix")];
+    const mixedAcc = { adAccountId: "act_mix", brandId: "brandA", mixed: true, ignored: false };
+    const r = aggregateMetaToCampaignMonths(insights, [map("c1", null, "SKD")], [mixedAcc]);
+    expect(r.rows).toEqual([]); // marka musi być per kampania
+  });
 });

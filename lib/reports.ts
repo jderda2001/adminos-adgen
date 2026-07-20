@@ -842,7 +842,9 @@ export interface MetaStatus {
 export async function getMetaStatus(): Promise<MetaStatus> {
   const [last, accounts, campaigns, configured, mock] = await Promise.all([
     db.metaSyncRun.findFirst({ orderBy: { ranAt: "desc" } }),
-    db.metaAdAccountMap.findMany({ select: { adAccountId: true, brandId: true, ignored: true } }),
+    db.metaAdAccountMap.findMany({
+      select: { adAccountId: true, brandId: true, mixed: true, ignored: true },
+    }),
     db.metaCampaignMap.findMany({
       where: { ignored: false },
       select: { adAccountId: true, brandId: true, vertical: true },
@@ -851,11 +853,12 @@ export async function getMetaStatus(): Promise<MetaStatus> {
     isMetaMock(),
   ]);
   const accById = new Map(accounts.map((a) => [a.adAccountId, a]));
-  const accountsPending = accounts.filter((a) => !a.ignored && !a.brandId).length;
+  const accountsPending = accounts.filter((a) => !a.ignored && !a.mixed && !a.brandId).length;
   const campaignsPending = campaigns.filter((c) => {
     const acc = accById.get(c.adAccountId);
-    if (acc?.ignored) return false;
-    const brand = c.brandId ?? acc?.brandId ?? null;
+    if (!acc || acc.ignored) return false;
+    if (acc.mixed) return !c.brandId || !c.vertical; // mieszane: marka+wertykal per kampania
+    const brand = c.brandId ?? acc.brandId ?? null;
     return Boolean(brand) && !c.vertical;
   }).length;
   return {
@@ -882,6 +885,7 @@ export interface MetaAccountRow {
   adAccountId: string;
   adAccountName: string;
   brandId: string | null;
+  mixed: boolean;
   ignored: boolean;
   campaignCount: number;
 }
@@ -925,6 +929,7 @@ export async function getMetaMappingData(): Promise<MetaMappingData> {
       adAccountId: a.adAccountId,
       adAccountName: a.adAccountName,
       brandId: a.brandId,
+      mixed: a.mixed,
       ignored: a.ignored,
       campaignCount: countByAccount.get(a.adAccountId) ?? 0,
     })),
@@ -932,6 +937,7 @@ export async function getMetaMappingData(): Promise<MetaMappingData> {
       adAccountId: id,
       adAccountName: name,
       brandId: null,
+      mixed: false,
       ignored: false,
       campaignCount: countByAccount.get(id) ?? 0,
     })),

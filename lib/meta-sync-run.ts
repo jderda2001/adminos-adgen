@@ -60,7 +60,7 @@ export async function runMetaSync(month: string): Promise<MetaSyncSummary> {
         select: { metaCampaignId: true, brandId: true, vertical: true, ignored: true },
       }),
       db.metaAdAccountMap.findMany({
-        select: { adAccountId: true, brandId: true, ignored: true },
+        select: { adAccountId: true, brandId: true, mixed: true, ignored: true },
       }),
     ]);
     const agg = aggregateMetaToCampaignMonths(insights, maps, accountMaps);

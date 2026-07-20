@@ -1,9 +1,10 @@
 "use client";
 
-// Przypisywanie Meta w 2 krokach: (1) KONTA reklamowe → marka wewnętrzna albo
-// „konto klienta" (pomijane w całości — konta abonamentowe znikają z widoku),
-// (2) KAMPANIE kont z marką → tylko wertykal (marka dziedziczona z konta),
-// z podpowiedzią wertykalu z nazwy kampanii. Autozapis optymistyczny.
+// Przypisywanie Meta w 2 krokach: (1) KONTA reklamowe → jedna marka, „wiele
+// marek (mieszane)" albo „konto klienta" (pomijane w całości), (2) KAMPANIE:
+// konta jednomarkowe → tylko wertykal (marka z konta); konta mieszane →
+// marka + wertykal per kampania. Podpowiedzi marki i wertykalu z nazwy
+// kampanii (np. „ReBalancer | OZE | …"). Autozapis optymistyczny.
 
 import { useMemo, useState, useTransition, type ReactNode } from "react";
 import { toast } from "sonner";
@@ -35,6 +36,7 @@ export interface MetaAccountRowUi {
   adAccountId: string;
   adAccountName: string;
   brandId: string | null;
+  mixed: boolean;
   ignored: boolean;
   campaignCount: number;
 }
@@ -51,32 +53,60 @@ export interface MetaCampaignRowUi {
 }
 
 const NONE = "__none__";
+const MIXED = "__mixed__";
 const CLIENT = "__client__";
 
-/** Podpowiedź wertykalu z nazwy kampanii (proste dopasowanie fragmentu). */
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]+/g, "");
+
+/** Podpowiedź wertykalu z nazwy kampanii (dopasowanie fragmentu). */
 function suggestVertical(name: string, verticals: readonly string[]): string | null {
-  const n = name.toLowerCase();
-  for (const v of verticals) if (n.includes(v.toLowerCase())) return v;
+  const n = norm(name);
+  for (const v of verticals) if (n.includes(norm(v))) return v;
   return null;
 }
 
-// ── Krok 1: konta reklamowe ──────────────────────────────────────────
+/** Podpowiedź marki z nazwy kampanii („ReBalancer" trafi w „Rebalancer"). */
+function suggestBrand(name: string, brands: readonly BrandOption[]): BrandOption | null {
+  const n = norm(name);
+  for (const b of brands) if (n.includes(norm(b.name))) return b;
+  return null;
+}
+
+interface AccState {
+  brandId: string | null;
+  mixed: boolean;
+  ignored: boolean;
+}
+interface CampState {
+  brandId: string | null;
+  vertical: string | null;
+  ignored: boolean;
+}
+
+const accDecided = (s: AccState) => s.ignored || s.mixed || Boolean(s.brandId);
+const campDone = (s: CampState, mixed: boolean) =>
+  s.ignored || (Boolean(s.vertical) && (!mixed || Boolean(s.brandId)));
+
+// ── Krok 1: konto reklamowe ──────────────────────────────────────────
 function AccountRow({
   row,
+  state,
   brands,
   onChange,
 }: {
   row: MetaAccountRowUi;
+  state: AccState;
   brands: BrandOption[];
   onChange: (value: string) => void;
 }) {
-  const value = row.ignored ? CLIENT : row.brandId ?? NONE;
-  const decided = value !== NONE;
+  const value = state.ignored ? CLIENT : state.mixed ? MIXED : state.brandId ?? NONE;
   return (
     <div
       className={cn(
         "flex items-center gap-3 rounded-xl border px-3.5 py-2.5",
-        decided ? "bg-card" : "border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
+        accDecided(state)
+          ? "bg-card"
+          : "border-amber-300 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
       )}
     >
       <div className="min-w-0 flex-1">
@@ -96,6 +126,7 @@ function AccountRow({
               {b.name}
             </SelectItem>
           ))}
+          <SelectItem value={MIXED}>Wiele marek (mieszane)</SelectItem>
           <SelectItem value={CLIENT}>Konto klienta — pomiń</SelectItem>
         </SelectContent>
       </Select>
@@ -103,31 +134,37 @@ function AccountRow({
   );
 }
 
-// ── Krok 2: kampania (tylko wertykal) ────────────────────────────────
+// ── Krok 2: kampania ─────────────────────────────────────────────────
 function CampaignRow({
   row,
-  brandName,
-  vertical,
-  ignored,
+  state,
+  accountMixed,
+  accountBrandName,
+  brands,
   verticals,
-  onVertical,
-  onIgnored,
+  onChange,
 }: {
   row: MetaCampaignRowUi;
-  brandName: string;
-  vertical: string | null;
-  ignored: boolean;
+  state: CampState;
+  accountMixed: boolean;
+  accountBrandName: string | null;
+  brands: BrandOption[];
   verticals: string[];
-  onVertical: (v: string | null) => void;
-  onIgnored: (v: boolean) => void;
+  onChange: (patch: Partial<CampState>) => void;
 }) {
-  const suggestion = useMemo(
+  const vSuggestion = useMemo(
     () => suggestVertical(row.metaCampaignName, verticals),
     [row.metaCampaignName, verticals]
   );
-  const done = ignored || Boolean(vertical);
+  const bSuggestion = useMemo(
+    () => (accountMixed ? suggestBrand(row.metaCampaignName, brands) : null),
+    [row.metaCampaignName, brands, accountMixed]
+  );
+  const brandName = accountMixed
+    ? brands.find((b) => b.id === state.brandId)?.name ?? null
+    : accountBrandName;
 
-  if (done) {
+  if (campDone(state, accountMixed)) {
     return (
       <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2 dark:border-emerald-900/50 dark:bg-emerald-950/25">
         <span className="grid size-6 shrink-0 place-items-center rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
@@ -136,11 +173,16 @@ function CampaignRow({
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium">{row.metaCampaignName}</div>
           <div className="truncate text-xs text-muted-foreground">
-            {ignored ? "pominięta" : `${brandName} · ${vertical}`}
+            {state.ignored ? "pominięta" : `${brandName} · ${state.vertical}`}
           </div>
         </div>
-        {ignored ? (
-          <Button variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={() => onIgnored(false)}>
+        {state.ignored ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0 text-muted-foreground"
+            onClick={() => onChange({ ignored: false })}
+          >
             <Undo2 data-icon="inline-start" /> Przywróć
           </Button>
         ) : (
@@ -148,7 +190,7 @@ function CampaignRow({
             variant="ghost"
             size="sm"
             className="shrink-0 text-muted-foreground"
-            onClick={() => onVertical(null)}
+            onClick={() => onChange(accountMixed ? { vertical: null, brandId: null } : { vertical: null })}
           >
             Zmień
           </Button>
@@ -157,28 +199,55 @@ function CampaignRow({
     );
   }
 
+  // sugestia „ustaw wszystko naraz" dla kont mieszanych
+  const comboSuggestion = accountMixed && bSuggestion && vSuggestion;
+
   return (
     <div className="rounded-xl border bg-card px-3.5 py-3 shadow-[var(--shadow-card)]">
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium">{row.metaCampaignName}</div>
-          <div className="text-xs text-muted-foreground">marka: {brandName}</div>
+          {!accountMixed && (
+            <div className="text-xs text-muted-foreground">marka: {accountBrandName}</div>
+          )}
         </div>
         <button
           type="button"
           className="shrink-0 text-xs text-muted-foreground underline-offset-2 hover:underline"
-          onClick={() => onIgnored(true)}
+          onClick={() => onChange({ ignored: true })}
         >
           pomiń
         </button>
       </div>
-      <div className="flex items-center gap-2">
-        <Select value={vertical ?? NONE} onValueChange={(v) => onVertical(v === NONE ? null : v)}>
+
+      <div className={cn("grid gap-2", accountMixed ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1")}>
+        {accountMixed && (
+          <Select
+            value={state.brandId ?? NONE}
+            onValueChange={(v) => onChange({ brandId: v === NONE ? null : v })}
+          >
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue placeholder="Marka" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>— marka —</SelectItem>
+              {brands.map((b) => (
+                <SelectItem key={b.id} value={b.id}>
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Select
+          value={state.vertical ?? NONE}
+          onValueChange={(v) => onChange({ vertical: v === NONE ? null : v })}
+        >
           <SelectTrigger size="sm" className="w-full">
-            <SelectValue placeholder="Wybierz wertykal" />
+            <SelectValue placeholder="Wertykal" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value={NONE}>— wybierz wertykal —</SelectItem>
+            <SelectItem value={NONE}>— wertykal —</SelectItem>
             {verticals.map((v) => (
               <SelectItem key={v} value={v}>
                 {v}
@@ -186,18 +255,45 @@ function CampaignRow({
             ))}
           </SelectContent>
         </Select>
-        {suggestion && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => onVertical(suggestion)}
-          >
-            <Sparkles data-icon="inline-start" /> {suggestion}
-          </Button>
-        )}
       </div>
+
+      {(comboSuggestion || (!accountMixed && vSuggestion) || (accountMixed && (bSuggestion || vSuggestion))) && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {comboSuggestion ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onChange({ brandId: bSuggestion!.id, vertical: vSuggestion })}
+            >
+              <Sparkles data-icon="inline-start" /> {bSuggestion!.name} · {vSuggestion}
+            </Button>
+          ) : (
+            <>
+              {accountMixed && bSuggestion && !state.brandId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onChange({ brandId: bSuggestion.id })}
+                >
+                  <Sparkles data-icon="inline-start" /> {bSuggestion.name}
+                </Button>
+              )}
+              {vSuggestion && !state.vertical && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onChange({ vertical: vSuggestion })}
+                >
+                  <Sparkles data-icon="inline-start" /> {vSuggestion}
+                </Button>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -219,42 +315,53 @@ export function MetaMappingDialog({
   const brandName = useMemo(() => new Map(brands.map((b) => [b.id, b.name])), [brands]);
   const [, startTransition] = useTransition();
 
-  // stan optymistyczny
-  const [accState, setAccState] = useState<Record<string, { brandId: string | null; ignored: boolean }>>(
-    () => Object.fromEntries(accounts.map((a) => [a.adAccountId, { brandId: a.brandId, ignored: a.ignored }]))
+  // Stan = NAKŁADKA optymistyczna na wartości z serwera (fallback do propsów).
+  // Dzięki temu konta/kampanie dograne po sync (router.refresh) nie wywracają
+  // stanu zainicjalizowanego przy pierwszym renderze.
+  const [accState, setAccState] = useState<Record<string, AccState>>({});
+  const [campState, setCampState] = useState<Record<string, CampState>>({});
+  const getAcc = (a: MetaAccountRowUi): AccState =>
+    accState[a.adAccountId] ?? { brandId: a.brandId, mixed: a.mixed, ignored: a.ignored };
+  const getCamp = (c: MetaCampaignRowUi): CampState =>
+    campState[c.metaCampaignId] ?? { brandId: c.brandId, vertical: c.vertical, ignored: c.ignored };
+  const accRowById = useMemo(
+    () => new Map(accounts.map((a) => [a.adAccountId, a])),
+    [accounts]
   );
-  const [campState, setCampState] = useState<Record<string, { vertical: string | null; ignored: boolean }>>(
-    () => Object.fromEntries(campaigns.map((c) => [c.metaCampaignId, { vertical: c.vertical, ignored: c.ignored }]))
-  );
+  const getAccByCampaign = (c: MetaCampaignRowUi): AccState | null => {
+    const row = accRowById.get(c.adAccountId);
+    return row ? getAcc(row) : null;
+  };
 
-  const accountsPending = accounts.filter((a) => {
-    const s = accState[a.adAccountId];
-    return !s.ignored && !s.brandId;
-  }).length;
+  const accountsPending = accounts.filter((a) => !accDecided(getAcc(a))).length;
 
-  // kampanie do kroku 2: konta z marką (nie klienckie); marka per kampania = override ?? konto
+  // krok 2: kampanie kont z marką lub mieszanych
   const step2Campaigns = campaigns.filter((c) => {
-    const acc = accState[c.adAccountId];
-    return acc && !acc.ignored && Boolean(c.brandId ?? acc.brandId);
+    const acc = getAccByCampaign(c);
+    return acc && !acc.ignored && (acc.mixed || Boolean(acc.brandId));
   });
   const campaignsPending = step2Campaigns.filter((c) => {
-    const s = campState[c.metaCampaignId];
-    return !s.ignored && !s.vertical;
+    const acc = getAccByCampaign(c);
+    return acc ? !campDone(getCamp(c), acc.mixed) : false;
   }).length;
 
   const [step, setStep] = useState<"konta" | "kampanie">(accountsPending > 0 ? "konta" : "kampanie");
 
-  function changeAccount(adAccountId: string, value: string) {
-    const prev = accState[adAccountId];
-    const next =
+  function changeAccount(row: MetaAccountRowUi, value: string) {
+    const adAccountId = row.adAccountId;
+    const prev = getAcc(row);
+    const next: AccState =
       value === CLIENT
-        ? { brandId: null, ignored: true }
-        : { brandId: value === NONE ? null : value, ignored: false };
+        ? { brandId: null, mixed: false, ignored: true }
+        : value === MIXED
+          ? { brandId: null, mixed: true, ignored: false }
+          : { brandId: value === NONE ? null : value, mixed: false, ignored: false };
     setAccState((s) => ({ ...s, [adAccountId]: next }));
     startTransition(async () => {
       const r = await setAccountMappingAction({
         adAccountId,
         brandId: next.brandId ?? undefined,
+        mixed: next.mixed,
         ignored: next.ignored,
       });
       if (!r.ok) {
@@ -264,13 +371,15 @@ export function MetaMappingDialog({
     });
   }
 
-  function changeCampaign(metaCampaignId: string, patch: Partial<{ vertical: string | null; ignored: boolean }>) {
-    const prev = campState[metaCampaignId];
+  function changeCampaign(row: MetaCampaignRowUi, patch: Partial<CampState>) {
+    const metaCampaignId = row.metaCampaignId;
+    const prev = getCamp(row);
     const next = { ...prev, ...patch };
     setCampState((s) => ({ ...s, [metaCampaignId]: next }));
     startTransition(async () => {
       const r = await setCampaignMappingAction({
         metaCampaignId,
+        brandId: next.brandId ?? "",
         vertical: next.vertical ?? "",
         ignored: next.ignored,
       });
@@ -281,12 +390,10 @@ export function MetaMappingDialog({
     });
   }
 
-  // konta ignorowane schowane pod przełącznikiem
   const [showIgnored, setShowIgnored] = useState(false);
-  const visibleAccounts = accounts.filter((a) => showIgnored || !accState[a.adAccountId].ignored);
-  const hiddenCount = accounts.length - accounts.filter((a) => !accState[a.adAccountId].ignored).length;
+  const visibleAccounts = accounts.filter((a) => showIgnored || !getAcc(a).ignored);
+  const hiddenCount = accounts.filter((a) => getAcc(a).ignored).length;
 
-  // kampanie kroku 2 pogrupowane po koncie (piguły jak dotąd)
   const step2Accounts = useMemo(() => {
     const m = new Map<string, { id: string; name: string; campaigns: MetaCampaignRowUi[] }>();
     for (const c of step2Campaigns) {
@@ -298,7 +405,9 @@ export function MetaMappingDialog({
   const [selectedAccId, setSelectedAccId] = useState<string | null>(null);
   const selectedAcc =
     step2Accounts.find((a) => a.id === selectedAccId) ??
-    step2Accounts.find((a) => a.campaigns.some((c) => !campState[c.metaCampaignId].ignored && !campState[c.metaCampaignId].vertical)) ??
+    step2Accounts.find((a) =>
+      a.campaigns.some((c) => !campDone(getCamp(c), getAccByCampaign(c)?.mixed ?? false))
+    ) ??
     step2Accounts[0];
 
   return (
@@ -308,8 +417,8 @@ export function MetaMappingDialog({
         <DialogHeader>
           <DialogTitle>Przypisz konta i kampanie</DialogTitle>
           <DialogDescription>
-            Najpierw powiedz, czyje jest każde konto reklamowe (konta klientów pomijamy),
-            potem nadaj kampaniom wertykal. Zapis następuje od razu.
+            Najpierw powiedz, czyje jest każde konto reklamowe (jedna marka, wiele marek
+            albo konto klienta — pomijane), potem uzupełnij kampanie. Zapis od razu.
           </DialogDescription>
         </DialogHeader>
 
@@ -350,9 +459,10 @@ export function MetaMappingDialog({
               {visibleAccounts.map((a) => (
                 <AccountRow
                   key={a.adAccountId}
-                  row={{ ...a, ...accState[a.adAccountId] }}
+                  row={a}
+                  state={getAcc(a)}
                   brands={brands}
-                  onChange={(v) => changeAccount(a.adAccountId, v)}
+                  onChange={(v) => changeAccount(a, v)}
                 />
               ))}
               {hiddenCount > 0 && (
@@ -371,14 +481,16 @@ export function MetaMappingDialog({
         ) : step2Accounts.length === 0 ? (
           <EmptyState
             title="Najpierw przypisz konta"
-            description="Żadne konto nie jest jeszcze przypisane do marki wewnętrznej — wróć do kroku 1."
+            description="Żadne konto nie jest jeszcze przypisane do marki (ani oznaczone jako mieszane) — wróć do kroku 1."
           />
         ) : (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-2">
               {step2Accounts.map((a) => {
+                const accRow = accRowById.get(a.id);
+                const mixed = accRow ? getAcc(accRow).mixed : false;
                 const left = a.campaigns.filter(
-                  (c) => !campState[c.metaCampaignId].ignored && !campState[c.metaCampaignId].vertical
+                  (c) => !campDone(getCamp(c), mixed)
                 ).length;
                 const active = a.id === selectedAcc?.id;
                 return (
@@ -407,19 +519,17 @@ export function MetaMappingDialog({
             </div>
             <div className="max-h-[46vh] space-y-2 overflow-y-auto pr-0.5">
               {selectedAcc?.campaigns.map((c) => {
-                const s = campState[c.metaCampaignId];
-                const acc = accState[c.adAccountId];
-                const bName = brandName.get(c.brandId ?? acc.brandId ?? "") ?? "?";
+                const acc = getAccByCampaign(c) ?? { brandId: null, mixed: false, ignored: false };
                 return (
                   <CampaignRow
                     key={c.id}
                     row={c}
-                    brandName={bName}
-                    vertical={s.vertical}
-                    ignored={s.ignored}
+                    state={getCamp(c)}
+                    accountMixed={acc.mixed}
+                    accountBrandName={acc.brandId ? brandName.get(acc.brandId) ?? "?" : null}
+                    brands={brands}
                     verticals={verticals}
-                    onVertical={(v) => changeCampaign(c.metaCampaignId, { vertical: v })}
-                    onIgnored={(v) => changeCampaign(c.metaCampaignId, { ignored: v })}
+                    onChange={(patch) => changeCampaign(c, patch)}
                   />
                 );
               })}

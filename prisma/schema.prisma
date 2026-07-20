@@ -338,6 +338,7 @@ model MetaAdAccountMap {
   adAccountId   String   @unique
   adAccountName String
   brandId       String?
+  mixed         Boolean  @default(false) // konto wielu marek — marka wybierana per kampania
   ignored       Boolean  @default(false)
   lastSeenAt    DateTime @default(now())
   updatedAt     DateTime @updatedAt

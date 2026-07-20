@@ -22,6 +22,8 @@ export interface CampaignMappingLike {
 export interface AccountMappingLike {
   adAccountId: string;
   brandId: string | null;
+  /** konto wielu marek — marka NIE dziedziczy się z konta, tylko per kampania */
+  mixed?: boolean;
   ignored: boolean;
 }
 
@@ -67,7 +69,10 @@ export function aggregateMetaToCampaignMonths(
     // świadomie pominięte: kampania ignored albo całe konto klienckie
     if (m?.ignored || acc?.ignored) continue;
 
-    const brandId = m?.brandId ?? (acc && !acc.ignored ? acc.brandId : null);
+    // marka: override kampanii → marka konta (chyba że konto mieszane — wtedy
+    // TYLKO per kampania)
+    const accountBrand = acc && !acc.ignored && !acc.mixed ? acc.brandId : null;
+    const brandId = m?.brandId ?? accountBrand;
     const vertical = m?.vertical ?? null;
 
     if (!brandId || !vertical) {

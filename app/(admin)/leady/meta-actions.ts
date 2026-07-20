@@ -52,13 +52,18 @@ export async function syncMetaCampaignsAction(
 const accountMappingSchema = z.object({
   adAccountId: z.string().min(1),
   brandId: z.string().optional(),
+  mixed: z.boolean().optional(),
   ignored: z.boolean().optional(),
 });
 
-/** Przypisuje konto reklamowe do marki wewnętrznej lub oznacza jako klienckie (pomijane). */
+/**
+ * Przypisuje konto reklamowe: do jednej marki, jako „mieszane" (wiele marek —
+ * marka wybierana per kampania) albo jako klienckie (pomijane w całości).
+ */
 export async function setAccountMappingAction(input: {
   adAccountId: string;
   brandId?: string;
+  mixed?: boolean;
   ignored?: boolean;
 }): Promise<ActionResult> {
   await requireAdmin();
@@ -67,7 +72,8 @@ export async function setAccountMappingAction(input: {
   const d = parsed.data;
 
   const ignored = d.ignored ?? false;
-  const brandId = ignored ? null : d.brandId || null;
+  const mixed = !ignored && (d.mixed ?? false);
+  const brandId = ignored || mixed ? null : d.brandId || null;
   if (brandId) {
     const brand = await db.brand.findUnique({ where: { id: brandId } });
     if (!brand) return fail("Wybrana marka nie istnieje");
@@ -80,17 +86,22 @@ export async function setAccountMappingAction(input: {
   });
   await db.metaAdAccountMap.upsert({
     where: { adAccountId: d.adAccountId },
-    update: { brandId, ignored },
+    update: { brandId, mixed, ignored },
     create: {
       adAccountId: d.adAccountId,
       adAccountName: fromCampaign?.adAccountName ?? d.adAccountId,
       brandId,
+      mixed,
       ignored,
     },
   });
   revalidateAll();
   return ok(
-    ignored ? "Konto oznaczone jako klienckie (pomijane)" : "Konto przypisane do marki"
+    ignored
+      ? "Konto oznaczone jako klienckie (pomijane)"
+      : mixed
+        ? "Konto oznaczone jako mieszane — marki wybierzesz przy kampaniach"
+        : "Konto przypisane do marki"
   );
 }
 
