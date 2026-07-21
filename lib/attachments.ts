@@ -81,3 +81,12 @@ export async function readAttachmentBuffer(
     contentType: MIME_BY_EXTENSION[ext] ?? "application/octet-stream",
   };
 }
+
+/** Logo adGen (PNG) do osadzenia w mailu inline (CID). null gdy brak pliku. */
+export async function readEmailLogo(): Promise<Buffer | null> {
+  try {
+    return await readFile(path.join(process.cwd(), "assets", "email", "adgen-logo.png"));
+  } catch {
+    return null;
+  }
+}

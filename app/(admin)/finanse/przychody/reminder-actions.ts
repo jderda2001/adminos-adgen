@@ -8,7 +8,7 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { getSettings } from "@/lib/settings";
 import { sendEmail, sendSms } from "@/lib/notify";
 import { renderReminderEmailHtml } from "@/lib/email-template";
-import { readAttachmentBuffer } from "@/lib/attachments";
+import { readAttachmentBuffer, readEmailLogo } from "@/lib/attachments";
 import { formatDate, formatMoney } from "@/lib/format";
 import {
   REMINDER_STEP_BY_KEY,
@@ -68,9 +68,11 @@ export async function sendReminderStepAction(input: {
   if (channel === "SMS") {
     result = await sendSms({ to, body: msg.body });
   } else {
-    // e-mail: brandowany HTML + załącznik faktury (jeśli wgrany)
+    // e-mail: brandowany HTML (styl Apple, logo inline) + załącznik faktury
     const raw = renderReminderMessage(stepKey, "EMAIL", { ctx }); // treść bez stopki
     const file = await readAttachmentBuffer(invoice.attachmentPath, invoice.attachmentName);
+    const logo = await readEmailLogo();
+    const LOGO_CID = "adgen-logo";
     const html = renderReminderEmailHtml({
       subject: raw.subject ?? "",
       bodyText: raw.body,
@@ -78,15 +80,22 @@ export async function sendReminderStepAction(input: {
       hasAttachment: Boolean(file),
       amountText: formatMoney(invoice.grossGr),
       dueText: formatDate(invoice.dueDate),
+      logoCid: logo ? LOGO_CID : undefined,
     });
+    const attachments = [
+      ...(logo
+        ? [{ filename: "adgen-logo.png", content: logo, contentType: "image/png", cid: LOGO_CID }]
+        : []),
+      ...(file
+        ? [{ filename: file.filename, content: file.buffer, contentType: file.contentType }]
+        : []),
+    ];
     result = await sendEmail({
       to,
       subject: msg.subject ?? "",
       body: msg.body,
       html,
-      attachments: file
-        ? [{ filename: file.filename, content: file.buffer, contentType: file.contentType }]
-        : undefined,
+      attachments: attachments.length ? attachments : undefined,
     });
   }
 

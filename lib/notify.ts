@@ -22,6 +22,7 @@ export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType?: string;
+  cid?: string; // gdy ustawione → obraz inline (referencja cid:<id> w HTML)
 }
 
 export async function sendEmail(args: {
@@ -55,6 +56,7 @@ export async function sendEmail(args: {
         filename: a.filename,
         content: a.content,
         contentType: a.contentType,
+        ...(a.cid ? { cid: a.cid } : {}),
       })),
     });
     return { ok: true, simulated: false };
