@@ -6,6 +6,7 @@ import {
   getAdBudgetStatus,
   getVatForMonth,
 } from "@/lib/reports";
+import { getAdBudgetCategoryIds } from "@/lib/settings";
 import { monthKey } from "@/lib/periods";
 import { formatMonth, todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
@@ -53,7 +54,11 @@ export default async function CostsPage({
   // miesiąc wybrany w filtrze (dla auto-budżetu i VAT); auto-budżet testowo od 08/2026
   const selectedMonth = monthKey(period.from);
   const AUTO_AD_BUDGET_FROM = "2026-08";
-  const adBudget = await getAdBudgetStatus(selectedMonth);
+  const showAutoAdBudget = selectedMonth >= AUTO_AD_BUDGET_FROM;
+  const [adBudget, adBudgetCatIds] = await Promise.all([
+    getAdBudgetStatus(selectedMonth),
+    getAdBudgetCategoryIds(),
+  ]);
   // VAT idzie za WYBRANYM okresem: miesiąc PRZED początkiem okresu (przeglądając
   // sierpień widzisz VAT za lipiec — kwotę odłożoną, płatną do US w tym miesiącu)
   const vatMonth = monthKey(
@@ -96,7 +101,20 @@ export default async function CostsPage({
       }),
     ]);
 
-  const rows: CostRow[] = costs.map((c) => ({
+  // od sierpnia „Budżet reklamowy" reprezentuje JEDEN auto-wiersz (szacunek −
+  // zasilenia) — pojedyncze wpisy tej kategorii chowamy z listy, a ich sumę
+  // (zasilenia) netujemy w auto-wierszu. Zasilenia = realne wpisy (bez planowanych).
+  const isAdBudgetCost = (categoryId: string) => adBudgetCatIds.has(categoryId);
+  const adBudgetFundedGr = showAutoAdBudget
+    ? costs
+        .filter((c) => !c.needsConfirmation && isAdBudgetCost(c.categoryId))
+        .reduce((s, c) => s + c.netGr, 0)
+    : 0;
+  const visibleCosts = showAutoAdBudget
+    ? costs.filter((c) => !isAdBudgetCost(c.categoryId))
+    : costs;
+
+  const rows: CostRow[] = visibleCosts.map((c) => ({
     id: c.id,
     supplierName: c.supplierName,
     supplierAccount: c.supplierAccount,
@@ -158,11 +176,11 @@ export default async function CostsPage({
         description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
       />
       <div className="space-y-4">
-        {selectedMonth >= AUTO_AD_BUDGET_FROM && (
+        {showAutoAdBudget && (
           <AdBudgetAutoRow
             monthLabel={formatMonth(selectedMonth)}
-            netGr={adBudget.planGr}
-            spentGr={adBudget.spentGr}
+            estimateGr={adBudget.planGr}
+            fundedGr={adBudgetFundedGr}
           />
         )}
         {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
