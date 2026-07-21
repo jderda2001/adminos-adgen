@@ -8,6 +8,7 @@ import {
   CircleX,
   Download,
   Info,
+  Megaphone,
   MessageSquare,
   Paperclip,
   Pencil,
@@ -110,6 +111,7 @@ export interface CostRow {
   attachmentName: string | null;
   recurringCostId: string | null;
   planned?: boolean; // zaplanowana przyszła kopia cykliczna (estymacja, jeszcze nie do zapłaty)
+  autoAdBudget?: boolean; // wiersz-widmo „Budżet reklamowy" (auto, tylko-do-odczytu, fioletowy)
 }
 
 export interface CostCommentItem {
@@ -575,14 +577,28 @@ export function CostsTable({
       {
         id: "approval",
         header: "Status",
-        cell: ({ row }) => <InlineStatus cost={row.original} />,
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <div className="flex h-7 items-center px-1">
+              <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-950 dark:text-purple-300">
+                auto
+              </span>
+            </div>
+          ) : (
+            <InlineStatus cost={row.original} />
+          ),
       },
       {
         accessorKey: "supplierName",
         header: ({ column }) => (
           <SortableHeader column={column}>Dostawca</SortableHeader>
         ),
-        cell: ({ row }) => (
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <span className="inline-flex items-center gap-1.5 font-medium text-purple-800 dark:text-purple-200">
+              <Megaphone className="size-3.5" /> {row.original.supplierName}
+            </span>
+          ) : (
           <div className="flex items-center gap-1.5">
             <InlineSupplier cost={row.original} />
             {row.original.attachmentName && (
@@ -622,16 +638,21 @@ export function CostsTable({
               authDisabled={authDisabled}
             />
           </div>
-        ),
+          ),
       },
       {
         accessorKey: "categoryName",
         header: ({ column }) => (
           <SortableHeader column={column}>Kategoria</SortableHeader>
         ),
-        cell: ({ row }) => (
-          <InlineCategory cost={row.original} categories={categories} />
-        ),
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <span className={categoryPillClass(row.original.categoryName)}>
+              {row.original.categoryName}
+            </span>
+          ) : (
+            <InlineCategory cost={row.original} categories={categories} />
+          ),
       },
       {
         accessorKey: "netGr",
@@ -641,11 +662,16 @@ export function CostsTable({
           </SortableHeader>
         ),
         meta: { align: "right" },
-        cell: ({ row }) => (
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <div className="text-right font-medium text-purple-800 tabular-nums dark:text-purple-200">
+              {formatMoney(row.original.netGr)}
+            </div>
+          ) : (
           <div className="flex justify-end">
             <InlineNet cost={row.original} />
           </div>
-        ),
+          ),
       },
       {
         accessorKey: "grossGr",
@@ -655,19 +681,32 @@ export function CostsTable({
           </SortableHeader>
         ),
         meta: { align: "right" },
-        cell: ({ row }) => formatMoney(row.original.grossGr),
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <span className="text-purple-800 tabular-nums dark:text-purple-200">
+              {formatMoney(row.original.grossGr)}
+            </span>
+          ) : (
+            formatMoney(row.original.grossGr)
+          ),
       },
       {
         accessorKey: "dueDate",
         header: ({ column }) => (
           <SortableHeader column={column}>Termin</SortableHeader>
         ),
-        cell: ({ row }) => <InlineDue cost={row.original} />,
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <InlineDue cost={row.original} />
+          ),
       },
       {
         id: "details",
         header: "",
-        cell: ({ row }) => (
+        cell: ({ row }) =>
+          row.original.autoAdBudget ? null : (
           <div className="flex justify-end">
             <Button
               variant="ghost"
@@ -680,7 +719,7 @@ export function CostsTable({
               <Info className="size-4" />
             </Button>
           </div>
-        ),
+          ),
       },
     ],
     [categories, currentUserId, authDisabled]
@@ -862,7 +901,13 @@ export function CostsTable({
         scrollable
         dense
         initialSorting={sortState}
-        rowClassName={() => "group"}
+        rowClassName={(row) =>
+          cn(
+            "group",
+            row.autoAdBudget &&
+              "bg-purple-50/70 hover:bg-purple-50 dark:bg-purple-950/25 dark:hover:bg-purple-950/40"
+          )
+        }
         footer={
           <>
             <TableCell colSpan={3} className="font-medium">

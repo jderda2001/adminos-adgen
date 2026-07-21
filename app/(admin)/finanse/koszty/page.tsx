@@ -145,6 +145,43 @@ export default async function CostsPage({
     planned: c.needsConfirmation, // zaplanowana przyszła kopia cykliczna
   }));
 
+  // wiersz-widmo „Budżet reklamowy" (auto) — jeden wyjątkowy wiersz rejestru
+  // spięty z górnym badge'em: kwota = szacunek − zasilenia (do zapłaty), fioletowy,
+  // tylko-do-odczytu; liczy się do sum i „Do zapłaty". Zasilenia (wpisy kategorii)
+  // są schowane z listy i netowane tutaj.
+  const adBudgetRemainingGr = Math.max(0, adBudget.planGr - adBudgetFundedGr);
+  const adBudgetCat = categories.find((c) => adBudgetCatIds.has(c.id));
+  if (showAutoAdBudget && adBudget.planGr > 0) {
+    const monthEndIso = new Date(
+      Date.UTC(period.from.getUTCFullYear(), period.from.getUTCMonth() + 1, 0)
+    ).toISOString();
+    rows.unshift({
+      id: "auto-ad-budget",
+      supplierName: "Budżet reklamowy — auto",
+      supplierAccount: null,
+      docNumber: "",
+      docDate: monthEndIso,
+      dueDate: null,
+      netGr: adBudgetRemainingGr,
+      vatRate: "ZW",
+      vatGr: 0,
+      grossGr: adBudgetRemainingGr, // budżet Meta = odwrotne obciążenie (netto = brutto)
+      categoryId: adBudgetCat?.id ?? "",
+      categoryName: adBudgetCat?.name ?? "Budżet reklamowy",
+      clientId: null,
+      clientName: null,
+      paid: adBudgetRemainingGr === 0,
+      approvedForPayment: false,
+      delayed: false,
+      paidDate: null,
+      comments: [],
+      attachmentName: null,
+      recurringCostId: null,
+      planned: false,
+      autoAdBudget: true,
+    });
+  }
+
   const pendingRows: PendingCostRow[] = pendingCosts.map((c) => ({
     id: c.id,
     supplierName: c.supplierName,
