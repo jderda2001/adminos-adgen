@@ -10,6 +10,7 @@ import { BoaCard } from "./boa-card";
 import { CompanyCard } from "./company-card";
 import { CategoriesCard, type CategoryRow } from "./categories-card";
 import { IntegrationsCard } from "./integrations-card";
+import { ReminderSettingsCard } from "./reminders-card";
 
 export const metadata: Metadata = { title: "Ustawienia" };
 
@@ -82,6 +83,19 @@ export default async function SettingsPage({
           metaAutosyncEnabled={settings.meta_autosync_enabled === "1"}
           flash={sp.meta ?? null}
           flashMsg={sp.msg ?? null}
+        />
+        <ReminderSettingsCard
+          enabled={settings.payment_reminders_enabled === "1"}
+          notifyMode={settings.notify_mode}
+          smtpHost={settings.smtp_host}
+          smtpPort={settings.smtp_port}
+          smtpUser={settings.smtp_user}
+          smtpFrom={settings.smtp_from}
+          smtpPassSet={Boolean(settings.smtp_pass)}
+          smsApiUrl={settings.sms_api_url}
+          smsSender={settings.sms_sender}
+          smsApiKeySet={Boolean(settings.sms_api_key)}
+          emailFooter={settings.reminder_email_footer}
         />
         <CategoriesCard categories={categoryRows} />
       </div>

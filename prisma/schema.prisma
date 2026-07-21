@@ -111,13 +111,41 @@ model Invoice {
   // 55 do dowiezienia); NIE wpływa na kwotę faktury. null = brak gwarancji.
   leadGuaranteePct Int?
   notes     String?
+  // sekwencja przypomnień o płatności (SMS/e-mail/telefon) wł./wył. per faktura
+  remindersEnabled Boolean @default(true)
   createdAt DateTime  @default(now())
 
-  items InvoiceItem[]
+  items     InvoiceItem[]
+  reminders InvoiceReminder[]
 
   @@index([clientId])
   @@index([saleDate])
   @@index([status])
+}
+
+// Krok sekwencji przypomnień o płatności per (faktura × krok × kanał). Kroki
+// wyliczane z dueDate faktury; „kolejka z akceptacją" — cron kolejkuje należny
+// krok (QUEUED), admin wysyła ręcznie (SENT/SIMULATED). Zatrzymanie z chwilą
+// oznaczenia faktury jako opłaconej. Etykiety/statusy: lib/payment-reminders.ts.
+model InvoiceReminder {
+  id          String    @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice   @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  stepKey     String // "D-1" | "D0" | "D+1" | "D+2" | "D+3"
+  channel     String // "SMS" | "EMAIL" | "PHONE"
+  dueOn       DateTime // dzień kroku = faktura.dueDate + offset
+  status      String    @default("QUEUED") // QUEUED|SENT|SIMULATED|SKIPPED|FAILED|DONE
+  toAddress   String? // e-mail/telefon (snapshot z chwili wysyłki)
+  subject     String? // temat maila (snapshot)
+  body        String? // treść (snapshot)
+  note        String? // notatka z telefonu / treść błędu
+  actedByName String? // kto wysłał/wykonał (snapshot)
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@unique([invoiceId, stepKey, channel])
+  @@index([invoiceId])
+  @@index([status, dueOn])
 }
 
 model InvoiceItem {

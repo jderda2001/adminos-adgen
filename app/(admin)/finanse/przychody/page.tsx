@@ -4,6 +4,8 @@ import { requireAdmin } from "@/lib/auth";
 import { refreshInvoiceStatuses, getActiveVerticalNames } from "@/lib/reports";
 import { resolvePeriod } from "@/lib/periods";
 import { INVOICE_STATUSES, VAT_RATES, VAT_RATE_FRACTIONS } from "@/lib/types";
+import { todayUTC } from "@/lib/format";
+import type { ExistingReminder } from "@/lib/payment-reminders";
 import {
   InvoicesTable,
   type InvoiceRow,
@@ -68,7 +70,19 @@ export default async function RevenuesPage({
         ...(clientFilter ? { clientId: clientFilter } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
       },
-      include: { client: { select: { name: true } } },
+      include: {
+        client: { select: { name: true, email: true, phone: true } },
+        reminders: {
+          select: {
+            stepKey: true,
+            channel: true,
+            status: true,
+            sentAt: true,
+            note: true,
+            actedByName: true,
+          },
+        },
+      },
       orderBy: { saleDate: "desc" },
     }),
     db.client.findMany({
@@ -99,6 +113,17 @@ export default async function RevenuesPage({
     leadUnitPriceGr: inv.leadUnitPriceGr,
     leadActivationFeeGr: inv.leadActivationFeeGr,
     leadGuaranteePct: inv.leadGuaranteePct,
+    remindersEnabled: inv.remindersEnabled,
+    reminders: inv.reminders.map((r) => ({
+      stepKey: r.stepKey,
+      channel: r.channel as "SMS" | "EMAIL" | "PHONE",
+      status: r.status as ExistingReminder["status"],
+      sentAt: r.sentAt?.toISOString() ?? null,
+      note: r.note,
+      actedByName: r.actedByName,
+    })),
+    clientHasEmail: Boolean(inv.client.email),
+    clientHasPhone: Boolean(inv.client.phone),
   }));
 
   // KPI miesiąca — na kwotach netto (agregat finansowy liczony netto).
@@ -120,6 +145,12 @@ export default async function RevenuesPage({
   );
 
   return (
-    <InvoicesTable invoices={rows} clients={clients} kpis={kpis} leadVerticals={leadVerticals} />
+    <InvoicesTable
+      invoices={rows}
+      clients={clients}
+      kpis={kpis}
+      leadVerticals={leadVerticals}
+      todayIso={todayUTC().toISOString()}
+    />
   );
 }

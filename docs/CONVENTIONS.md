@@ -228,3 +228,22 @@ gotówkowe), `Client.endDate/noticeMonths` (przychód umowny vs zakładany),
 `RecurringCost.endPeriod` (raty/leasingi — `generateRecurringCosts` kończy na tym
 miesiącu). Dedup szablon↔historia: `baselineResidual = max(0, śr.3M RW − Σszablonów)`.
 Bez wpisanego `CashSnapshot` cash flow = null (EmptyState z instrukcją).
+
+## Przypomnienia o płatnościach (Przychody)
+
+Sekwencja miękkiej windykacji wokół `Invoice.dueDate` (SMS + e-mail + telefon).
+Silnik czysty w `lib/payment-reminders.ts` (`REMINDER_STEPS` D-1…D+3, szablony,
+`buildReminderTimeline`, `currentStepFor`) — testy `tests/payment-reminders.test.ts`.
+Zasada „tylko najświeższy": aktualny jest krok o największym offsecie ≤ dni-od-
+terminu; starsze niewykonane → pominięte. Zakres: statusy `ISSUED`/`OVERDUE`.
+Stop z chwilą wpłaty (`markInvoicePaidAction` gasi QUEUED → SKIPPED) lub pauzy
+(`Invoice.remindersEnabled`).
+
+Model „kolejka z akceptacją": cron `POST /api/cron/payment-reminders` (nagłówek
+`x-cron-secret`, gate `payment_reminders_enabled`) KOLEJKUJE należne kroki
+(`lib/reminder-run.ts`); wysyłkę odpala admin ręcznie z osi czasu w szczegółach
+pozycji (`reminder-timeline.tsx` + `reminder-actions.ts`). Wysyłka przez
+`lib/notify.ts` z BRAMKĄ `notify_mode`: `"off"` = SYMULACJA (nic nie wychodzi,
+status `SIMULATED`), `"live"` = realny SMTP (nodemailer) / HTTP SMS. Sekrety
+SMTP/SMS w tabeli `Setting` (jak `meta_app_secret`). Prod: dopisać do crontab
+dzienny `curl` na route (jak meta-sync).

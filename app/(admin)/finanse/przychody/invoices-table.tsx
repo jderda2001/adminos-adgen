@@ -79,6 +79,8 @@ import {
   markInvoicePaidAction,
   undoInvoicePaymentAction,
 } from "./actions";
+import { ReminderTimeline } from "./reminder-timeline";
+import type { ExistingReminder } from "@/lib/payment-reminders";
 
 export interface InvoiceRow {
   id: string;
@@ -101,6 +103,11 @@ export interface InvoiceRow {
   leadUnitPriceGr: number | null;
   leadActivationFeeGr: number | null;
   leadGuaranteePct: number | null;
+  // sekwencja przypomnień o płatności
+  remindersEnabled: boolean;
+  reminders: ExistingReminder[];
+  clientHasEmail: boolean;
+  clientHasPhone: boolean;
 }
 
 export interface ClientOption {
@@ -200,11 +207,13 @@ export function InvoicesTable({
   clients,
   kpis,
   leadVerticals,
+  todayIso,
 }: {
   invoices: InvoiceRow[];
   clients: ClientOption[];
   kpis: RevenueKpis;
   leadVerticals: string[];
+  todayIso: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -702,6 +711,18 @@ export function InvoicesTable({
                 {openPosition.notes || "—"}
               </span>
             </DetailRow>
+            {["ISSUED", "OVERDUE", "PAID"].includes(openPosition.status) && (
+              <ReminderTimeline
+                invoiceId={openPosition.id}
+                dueDateIso={openPosition.dueDate}
+                status={openPosition.status}
+                remindersEnabled={openPosition.remindersEnabled}
+                reminders={openPosition.reminders}
+                todayIso={todayIso}
+                clientHasEmail={openPosition.clientHasEmail}
+                clientHasPhone={openPosition.clientHasPhone}
+              />
+            )}
           </div>
         )}
       </DetailSheet>

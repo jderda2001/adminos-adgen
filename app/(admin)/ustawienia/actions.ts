@@ -200,6 +200,48 @@ export async function saveCompanySettingsAction(
   return ok("Dane firmy zostały zapisane");
 }
 
+// ── Przypomnienia o płatnościach (SMS/e-mail) ────────────────────────
+
+const reminderSchema = z.object({
+  enabled: z.boolean(),
+  notifyMode: z.enum(["off", "live"]),
+  smtpHost: z.string().trim().default(""),
+  smtpPort: z.string().trim().default("587"),
+  smtpUser: z.string().trim().default(""),
+  smtpPass: z.string().default(""), // sekret — puste = bez zmian
+  smtpFrom: z.string().trim().default(""),
+  smsApiUrl: z.string().trim().default(""),
+  smsApiKey: z.string().default(""), // sekret — puste = bez zmian
+  smsSender: z.string().trim().default(""),
+  emailFooter: z.string().default(""),
+});
+
+export async function saveReminderSettingsAction(
+  input: z.input<typeof reminderSchema>
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = reminderSchema.safeParse(input);
+  if (!parsed.success) {
+    return fail(parsed.error.issues[0]?.message ?? "Nieprawidłowe dane formularza");
+  }
+  const d = parsed.data;
+  await setSetting("payment_reminders_enabled", d.enabled ? "1" : "0");
+  await setSetting("notify_mode", d.notifyMode);
+  await setSetting("smtp_host", d.smtpHost);
+  await setSetting("smtp_port", d.smtpPort || "587");
+  await setSetting("smtp_user", d.smtpUser);
+  if (d.smtpPass) await setSetting("smtp_pass", d.smtpPass); // puste = zostaw stary
+  await setSetting("smtp_from", d.smtpFrom);
+  await setSetting("sms_api_url", d.smsApiUrl);
+  if (d.smsApiKey) await setSetting("sms_api_key", d.smsApiKey); // puste = zostaw stary
+  await setSetting("sms_sender", d.smsSender);
+  await setSetting("reminder_email_footer", d.emailFooter);
+
+  revalidatePath("/ustawienia");
+  revalidatePath("/finanse/przychody");
+  return ok("Ustawienia przypomnień zapisane");
+}
+
 // ── Kategorie kosztów ────────────────────────────────────────────────
 
 const categoryNameSchema = z

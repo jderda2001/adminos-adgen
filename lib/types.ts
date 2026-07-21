@@ -128,6 +128,22 @@ export const SETTING_DEFAULTS = {
   meta_app_secret: "", // sekret aplikacji (server-only, nigdy do klienta)
   meta_access_token: "", // token dostępu (z OAuth lub wklejony ręcznie; fallback: env)
   meta_oauth_base_url: "", // bazowy URL HTTPS do redirectu OAuth (puste = z żądania)
+  // Przypomnienia o płatnościach (Przychody). Master-switch crona kolejkującego.
+  payment_reminders_enabled: "0", // "1" wł. — cron kolejkuje należne kroki
+  // Tryb wysyłki: "off" = SYMULACJA (nic nie wychodzi), "live" = realna wysyłka.
+  // Domyślnie "off" — bramka bezpieczeństwa do czasu wpisania danych SMTP/SMS.
+  notify_mode: "off",
+  smtp_host: "",
+  smtp_port: "587",
+  smtp_user: "",
+  smtp_pass: "", // server-only, nigdy do klienta
+  smtp_from: "", // adres nadawcy, np. "adGen <biuro@adgen.pl>"
+  sms_api_url: "", // endpoint HTTP dostawcy SMS (POST)
+  sms_api_key: "", // klucz API dostawcy SMS (server-only)
+  sms_sender: "", // nazwa/nr nadawcy SMS
+  // Stopka e-maili przypomnień (edytowalna) — doklejana pod treść.
+  reminder_email_footer:
+    "Za każde skuteczne polecenie naszych usług wypłacamy 25% prowizji. Zapraszamy do współpracy!\n\nZespół adGen",
 } as const;
 export type SettingKey = keyof typeof SETTING_DEFAULTS;
 

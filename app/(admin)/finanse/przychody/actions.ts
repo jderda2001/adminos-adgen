@@ -329,6 +329,11 @@ export async function markInvoicePaidAction(
     where: { id },
     data: { status: "PAID", paidDate },
   });
+  // Wpłata wstrzymuje sekwencję przypomnień: niewysłane kroki (QUEUED) → SKIPPED
+  await db.invoiceReminder.updateMany({
+    where: { invoiceId: id, status: "QUEUED" },
+    data: { status: "SKIPPED", note: "opłacona — automatyzacja wstrzymana" },
+  });
   revalidatePath("/finanse/przychody");
   return ok("Pozycja została oznaczona jako opłacona");
 }
