@@ -9,7 +9,7 @@ import {
 import { monthKey } from "@/lib/periods";
 import { formatMonth, todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { AdBudgetSummary } from "@/components/ad-budget-summary";
+import { AdBudgetAutoRow } from "./ad-budget-auto-row";
 import { buildCostFilters, type CostFilterParams } from "./filters";
 import { CostsTable, type CostRow } from "./costs-table";
 import { PendingCosts, type PendingCostRow } from "./pending-costs";
@@ -50,8 +50,10 @@ export default async function CostsPage({
   // tabela per miesiąc pokazuje też zaplanowane przyszłe kopie (estymacja)
   const { where, period } = buildCostFilters(filters, { plannedFrom: nextMonthStart });
 
-  // budżet reklamowy bieżącego miesiąca (plan marek vs wydane wg Mety) — banner
-  const adBudget = await getAdBudgetStatus(monthKey(today));
+  // miesiąc wybrany w filtrze (dla auto-budżetu i VAT); auto-budżet testowo od 08/2026
+  const selectedMonth = monthKey(period.from);
+  const AUTO_AD_BUDGET_FROM = "2026-08";
+  const adBudget = await getAdBudgetStatus(selectedMonth);
   // VAT idzie za WYBRANYM okresem: miesiąc PRZED początkiem okresu (przeglądając
   // sierpień widzisz VAT za lipiec — kwotę odłożoną, płatną do US w tym miesiącu)
   const vatMonth = monthKey(
@@ -156,8 +158,12 @@ export default async function CostsPage({
         description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
       />
       <div className="space-y-4">
-        {(adBudget.planGr > 0 || adBudget.spentGr > 0) && (
-          <AdBudgetSummary status={adBudget} variant="banner" />
+        {selectedMonth >= AUTO_AD_BUDGET_FROM && (
+          <AdBudgetAutoRow
+            monthLabel={formatMonth(selectedMonth)}
+            netGr={adBudget.planGr}
+            spentGr={adBudget.spentGr}
+          />
         )}
         {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
         <CostsTable
