@@ -6,6 +6,8 @@
 // terminu; wcześniejsze niewykonane oznaczamy jako pominięte (bez serii wiadomości).
 // Zatrzymanie sekwencji z chwilą opłacenia faktury (paid) lub pauzy (enabled=false).
 
+import { formatDate, formatMoney } from "./format";
+
 export type ReminderChannel = "SMS" | "EMAIL" | "PHONE";
 export type ReminderStatus =
   | "QUEUED" // zakolejkowany, czeka na wysłanie przez admina
@@ -58,52 +60,67 @@ interface ReminderTemplate {
   phoneInstruction?: string;
 }
 
-// Treści dokładnie wg procedury (wersja klienta). Bez interpolacji danych
-// wrażliwych — wiadomości są celowo ogólne („za fakturę").
+// Treści wg procedury. Placeholdery {kwota} (brutto do zapłaty) i {termin}
+// (data płatności) są ZAWSZE podstawiane przez renderReminderMessage — każda
+// wiadomość (SMS/e-mail) niesie kwotę i termin, żeby całość była zautomatyzowana.
 export const REMINDER_TEMPLATES: Record<string, ReminderTemplate> = {
   "D-1": {
-    sms: "Przypominamy, iż termin płatności faktury upływa jutro. Prosimy o terminową wpłatę, co pozwoli nam na sprawne planowanie dalszych prac. Pozdrawiamy, Zespół adGen",
-    emailSubject: "Termin płatności mija jutro | adGen",
+    sms: "Przypominamy: termin płatności faktury na kwotę {kwota} upływa jutro ({termin}). Prosimy o terminową wpłatę. Pozdrawiamy, Zespół adGen",
+    emailSubject: "Przypomnienie — termin płatności {termin} | adGen",
     emailBody:
-      "Dzień dobry,\n\nchcielibyśmy przypomnieć, że termin płatności za fakturę upływa w dniu jutrzejszym. Będziemy wdzięczni za terminową wpłatę, co pozwoli nam na sprawne planowanie dalszych działań i prac.",
+      "Dzień dobry,\n\nprzypominamy, że termin płatności faktury na kwotę {kwota} upływa jutro, {termin}. Będziemy wdzięczni za terminową wpłatę, co pozwoli nam na sprawne planowanie dalszych działań i prac.",
   },
   "D0": {
-    sms: "Dzisiaj upływa termin płatności faktury. Prosimy o wykonanie przelewu w dniu dzisiejszym. Dziękujemy za terminowość. Pozdrawiamy, Zespół adGen",
-    emailSubject: "Dzisiaj mija termin płatności | adGen",
+    sms: "Dzisiaj ({termin}) upływa termin płatności faktury na kwotę {kwota}. Prosimy o wykonanie przelewu w dniu dzisiejszym. Dziękujemy, Zespół adGen",
+    emailSubject: "Dzisiaj mija termin płatności ({termin}) | adGen",
     emailBody:
-      "Dzień dobry,\n\ninformujemy, że w dniu dzisiejszym upływa termin płatności za fakturę. Uprzejmie prosimy o uregulowanie należności. Jeśli dokonali już Państwo przelewu, będziemy wdzięczni za przesłanie potwierdzenia w wiadomości zwrotnej – pozwoli to uniknąć automatycznych powiadomień o zaległościach.",
+      "Dzień dobry,\n\ninformujemy, że dziś, {termin}, upływa termin płatności faktury na kwotę {kwota}. Uprzejmie prosimy o uregulowanie należności. Jeśli dokonali już Państwo przelewu, prosimy o przesłanie potwierdzenia w wiadomości zwrotnej – pozwoli to uniknąć automatycznych powiadomień o zaległościach.",
   },
   "D+1": {
-    sms: "Informujemy, iż nie odnotowaliśmy płatności za fakturę, której termin upłynął w dniu dzisiejszym. Prosimy o weryfikację statusu płatności i przesłanie potwierdzenia przelewu. Pozdrawiamy, Zespół adGen",
-    emailSubject: "Termin płatności faktury upłynął | adGen",
+    sms: "Nie odnotowaliśmy płatności faktury na kwotę {kwota}, której termin upłynął {termin}. Prosimy o pilną wpłatę i przesłanie potwierdzenia przelewu. Pozdrawiamy, Zespół adGen",
+    emailSubject: "Termin płatności ({termin}) upłynął | adGen",
     emailBody:
-      "Dzień dobry,\n\nodnotowaliśmy, że termin płatności faktury upłynął w dniu dzisiejszym, a środki nie zostały jeszcze zaksięgowane na naszym koncie. Prosimy o pilną weryfikację statusu płatności. Jeśli przelew został już zlecony, prosimy o przesłanie potwierdzenia. W przypadku jakichkolwiek trudności, zapraszamy do kontaktu.",
+      "Dzień dobry,\n\nodnotowaliśmy, że termin płatności faktury na kwotę {kwota} upłynął {termin}, a środki nie zostały jeszcze zaksięgowane na naszym koncie. Prosimy o pilną weryfikację statusu płatności. Jeśli przelew został już zlecony, prosimy o przesłanie potwierdzenia. W razie trudności — zapraszamy do kontaktu.",
   },
   "D+2": {
     phoneInstruction:
-      "Telefon z działu administracyjnego w sprawie płatności. Pytanie o aktualny status płatności i termin spodziewanego przelewu. Rozmowa stanowcza, ale miła: podkreślić upływ terminu, poprosić o potwierdzenie przelewu jeśli wykonany. Jeśli nie — obligować do płatności i poprosić o dokładny termin oraz godzinę w ciągu dnia, w której wpłyną środki lub zostanie wysłane potwierdzenie z bankowości elektronicznej.",
+      "Kwota do zapłaty: {kwota}, termin płatności był {termin}. Telefon z działu administracyjnego: pytanie o aktualny status płatności i termin spodziewanego przelewu. Rozmowa stanowcza, ale miła: podkreślić upływ terminu, poprosić o potwierdzenie przelewu jeśli wykonany. Jeśli nie — obligować do płatności i poprosić o dokładny termin oraz godzinę, w której wpłyną środki lub zostanie wysłane potwierdzenie z bankowości elektronicznej.",
   },
   "D+3": {
-    sms: "Informujemy, iż termin płatności faktury upłynął 2 dni temu. Prosimy o niezwłoczne uregulowanie należności w celu uniknięcia opóźnień w obsłudze. Pozdrawiamy, Zespół adGen",
-    emailSubject: "Zaległość w płatności – prośba o pilną wpłatę | adGen",
+    sms: "Faktura na kwotę {kwota} (termin {termin}) pozostaje nieopłacona. Prosimy o niezwłoczne uregulowanie należności, aby uniknąć opóźnień w obsłudze. Pozdrawiamy, Zespół adGen",
+    emailSubject: "Zaległość w płatności — prośba o pilną wpłatę | adGen",
     emailBody:
-      "Dzień dobry,\n\nzwracamy uwagę na brak zaksięgowania płatności za fakturę, której termin upłynął 3 dni temu. Prosimy o niezwłoczne uregulowanie należności lub kontakt, jeśli istnieją powody opóźnienia, o których powinniśmy wiedzieć. Zależy nam na wyjaśnieniu tej sprawy bez konieczności wdrażania dalszych procedur windykacyjnych.",
+      "Dzień dobry,\n\nfaktura na kwotę {kwota} z terminem płatności {termin} pozostaje nieopłacona, a środki nie zostały zaksięgowane na naszym koncie. Prosimy o niezwłoczne uregulowanie należności lub kontakt, jeśli istnieją powody opóźnienia, o których powinniśmy wiedzieć. Zależy nam na wyjaśnieniu tej sprawy bez wdrażania dalszych procedur windykacyjnych.",
     phoneInstruction:
-      "Ponowny kontakt z działu administracyjno-prawnego. Pytanie o status i czas przelewu. Podkreślić, że minęły już 3 dni. Stanowczo (ale miło) obligować do płatności i żądać konkretnej godziny przelewu. Kluczowe: odnieść się do wczorajszej rozmowy, w której klient zobowiązał się do wpłaty — wytknąć niedotrzymanie ustaleń z pewnością siebie w głosie.",
+      "Kwota do zapłaty: {kwota}, termin płatności był {termin}. Ponowny kontakt z działu administracyjno-prawnego: pytanie o status i czas przelewu. Podkreślić, że termin minął. Stanowczo (ale miło) obligować do płatności i żądać konkretnej godziny przelewu. Kluczowe: odnieść się do wcześniejszej rozmowy, w której klient zobowiązał się do wpłaty — wytknąć niedotrzymanie ustaleń.",
   },
 };
 
-/** Wyrenderowana wiadomość dla danego kroku i kanału. Do e-maila doklejamy stopkę. */
+/** Kontekst do podstawienia w treści: kwota brutto do zapłaty + termin płatności. */
+export interface ReminderContext {
+  amountGr: number; // brutto do zapłaty
+  dueDate: Date; // termin płatności
+}
+
+function fill(text: string, ctx?: ReminderContext): string {
+  const kwota = ctx ? formatMoney(ctx.amountGr) : "—";
+  const termin = ctx ? formatDate(ctx.dueDate) : "—";
+  return text.replace(/\{kwota\}/g, kwota).replace(/\{termin\}/g, termin);
+}
+
+/** Wyrenderowana wiadomość dla danego kroku i kanału. {kwota}/{termin} podstawiane
+ * z ctx; do e-maila doklejamy stopkę. */
 export function renderReminderMessage(
   stepKey: string,
   channel: ReminderChannel,
-  opts?: { emailFooter?: string }
+  opts?: { emailFooter?: string; ctx?: ReminderContext }
 ): { subject: string | null; body: string } {
   const t = REMINDER_TEMPLATES[stepKey] ?? {};
-  if (channel === "SMS") return { subject: null, body: t.sms ?? "" };
-  if (channel === "PHONE") return { subject: null, body: t.phoneInstruction ?? "" };
+  const ctx = opts?.ctx;
+  if (channel === "SMS") return { subject: null, body: fill(t.sms ?? "", ctx) };
+  if (channel === "PHONE") return { subject: null, body: fill(t.phoneInstruction ?? "", ctx) };
   const footer = opts?.emailFooter ? `\n\n—\n${opts.emailFooter}` : "";
-  return { subject: t.emailSubject ?? "", body: (t.emailBody ?? "") + footer };
+  return { subject: fill(t.emailSubject ?? "", ctx), body: fill(t.emailBody ?? "", ctx) + footer };
 }
 
 // ── Wyliczanie osi czasu ─────────────────────────────────────────────

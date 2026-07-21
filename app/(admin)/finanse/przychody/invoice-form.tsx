@@ -44,6 +44,7 @@ import {
 import {
   createInvoiceAction,
   updateInvoiceAction,
+  uploadInvoiceAttachmentAction,
   type InvoiceFormInput,
 } from "./actions";
 import type { ClientOption, InvoiceRow } from "./invoices-table";
@@ -81,6 +82,7 @@ export function InvoiceFormDialog({
   const [leadUnitPrice, setLeadUnitPrice] = useState("");
   const [leadActivationFee, setLeadActivationFee] = useState("");
   const [leadGuaranteePct, setLeadGuaranteePct] = useState("");
+  const [file, setFile] = useState<File | null>(null); // plik faktury (załącznik do maila)
 
   const today = todayUTC();
   const defaultSaleDate = invoice
@@ -105,6 +107,7 @@ export function InvoiceFormDialog({
     setLeadGuaranteePct(
       invoice?.leadGuaranteePct != null ? String(invoice.leadGuaranteePct) : ""
     );
+    setFile(null);
   }
 
   function handleOpenChange(next: boolean) {
@@ -215,12 +218,24 @@ export function InvoiceFormDialog({
       const result = invoice
         ? await updateInvoiceAction(invoice.id, input)
         : await createInvoiceAction(input);
-      if (result.ok) {
-        toast.success(result.message);
-        setOpen(false);
-      } else {
+      if (!result.ok) {
         toast.error(result.error);
+        return;
       }
+      // po zapisie: jeśli wybrano plik faktury — wgraj go (załącznik do maila)
+      const id = invoice?.id ?? (result as { id?: string }).id;
+      if (file && id) {
+        const fd = new FormData();
+        fd.append("attachment", file);
+        const up = await uploadInvoiceAttachmentAction(id, fd);
+        if (!up.ok) {
+          toast.error(`Zapisano, ale nie udało się wgrać pliku: ${up.error}`);
+          setOpen(false);
+          return;
+        }
+      }
+      toast.success(result.message);
+      setOpen(false);
     });
   }
 
@@ -521,6 +536,26 @@ export function InvoiceFormDialog({
               defaultValue={invoice?.notes ?? ""}
               placeholder="Dodatkowe usługi, uwagi do rozliczenia…"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="attachment">Faktura (plik)</Label>
+            {invoice?.attachmentName && !file && (
+              <p className="text-xs text-muted-foreground">
+                Obecny plik:{" "}
+                <span className="font-medium text-foreground">{invoice.attachmentName}</span>
+                {" "}— wybranie nowego zastąpi go.
+              </p>
+            )}
+            <Input
+              id="attachment"
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              onChange={(e) => setFile(e.currentTarget.files?.[0] ?? null)}
+            />
+            <p className="text-xs text-muted-foreground">
+              PDF lub skan (maks. 10 MB). Dołączymy go jako załącznik do e-maili przypominających o płatności.
+            </p>
           </div>
 
           <DialogFooter>

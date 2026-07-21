@@ -9,6 +9,7 @@ import { getSettings } from "@/lib/settings";
 import { sendEmail, sendSms } from "@/lib/notify";
 import { renderReminderEmailHtml } from "@/lib/email-template";
 import { readAttachmentBuffer } from "@/lib/attachments";
+import { formatDate, formatMoney } from "@/lib/format";
 import {
   REMINDER_STEP_BY_KEY,
   renderReminderMessage,
@@ -58,21 +59,25 @@ export async function sendReminderStepAction(input: {
   const footer = [settings.company_name, settings.company_address, settings.reminder_email_footer]
     .filter(Boolean)
     .join("\n");
+  // kwota brutto + termin płatności trafiają do KAŻDEJ treści (SMS/e-mail)
+  const ctx = { amountGr: invoice.grossGr, dueDate: invoice.dueDate };
   // wersja tekstowa (fallback + snapshot w bazie) — z doklejoną stopką
-  const msg = renderReminderMessage(stepKey, channel, { emailFooter: footer });
+  const msg = renderReminderMessage(stepKey, channel, { emailFooter: footer, ctx });
 
   let result;
   if (channel === "SMS") {
     result = await sendSms({ to, body: msg.body });
   } else {
     // e-mail: brandowany HTML + załącznik faktury (jeśli wgrany)
-    const raw = renderReminderMessage(stepKey, "EMAIL"); // treść bez stopki
+    const raw = renderReminderMessage(stepKey, "EMAIL", { ctx }); // treść bez stopki
     const file = await readAttachmentBuffer(invoice.attachmentPath, invoice.attachmentName);
     const html = renderReminderEmailHtml({
       subject: raw.subject ?? "",
       bodyText: raw.body,
       footerText: footer,
       hasAttachment: Boolean(file),
+      amountText: formatMoney(invoice.grossGr),
+      dueText: formatDate(invoice.dueDate),
     });
     result = await sendEmail({
       to,

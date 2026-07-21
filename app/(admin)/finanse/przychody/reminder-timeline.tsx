@@ -58,6 +58,7 @@ function statusLabel(s: DisplayStatus): string {
 export interface ReminderTimelineProps {
   invoiceId: string;
   dueDateIso: string;
+  grossGr: number; // kwota brutto do zapłaty (podgląd treści)
   status: string; // status faktury (PAID → sekwencja wstrzymana)
   remindersEnabled: boolean;
   reminders: ExistingReminder[];
@@ -69,6 +70,7 @@ export interface ReminderTimelineProps {
 export function ReminderTimeline({
   invoiceId,
   dueDateIso,
+  grossGr,
   status,
   remindersEnabled,
   reminders,
@@ -80,6 +82,7 @@ export function ReminderTimeline({
   const [noteFor, setNoteFor] = useState<string | null>(null); // stepKey telefonu w edycji
   const [noteText, setNoteText] = useState("");
 
+  const msgCtx = { amountGr: grossGr, dueDate: new Date(dueDateIso) };
   const paid = status === "PAID";
   const tl = buildReminderTimeline(new Date(dueDateIso), new Date(todayIso), reminders, {
     paid,
@@ -139,11 +142,11 @@ export function ReminderTimeline({
                 const Icon = CHANNEL_ICON[ch.channel];
                 const preview =
                   ch.actionable && ch.channel !== "PHONE"
-                    ? renderReminderMessage(step.key, ch.channel)
+                    ? renderReminderMessage(step.key, ch.channel, { ctx: msgCtx })
                     : null;
                 const phoneInstruction =
                   ch.actionable && ch.channel === "PHONE"
-                    ? renderReminderMessage(step.key, "PHONE").body
+                    ? renderReminderMessage(step.key, "PHONE", { ctx: msgCtx }).body
                     : null;
                 const missingContact =
                   (ch.channel === "SMS" && !clientHasPhone) ||

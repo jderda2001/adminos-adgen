@@ -86,17 +86,31 @@ describe("buildReminderTimeline", () => {
 });
 
 describe("renderReminderMessage", () => {
-  it("SMS = sama treść; e-mail = temat + treść + stopka; telefon = instrukcja", () => {
-    const sms = renderReminderMessage("D-1", "SMS");
-    expect(sms.subject).toBeNull();
-    expect(sms.body).toContain("termin płatności faktury upływa jutro");
+  const ctx = { amountGr: 615000, dueDate: new Date(Date.UTC(2026, 6, 10)) }; // 6150 zł, 10.07.2026
 
-    const email = renderReminderMessage("D-1", "EMAIL", { emailFooter: "Zespół adGen" });
-    expect(email.subject).toBe("Termin płatności mija jutro | adGen");
-    expect(email.body).toContain("w dniu jutrzejszym");
+  it("każdy SMS niesie kwotę brutto i termin", () => {
+    for (const key of ["D-1", "D0", "D+1", "D+3"]) {
+      const sms = renderReminderMessage(key, "SMS", { ctx });
+      expect(sms.subject).toBeNull();
+      expect(sms.body).toContain("6150,00 zł"); // kwota brutto
+      expect(sms.body).toContain("10.07.2026"); // termin
+      expect(sms.body).not.toContain("{"); // brak niepodstawionych placeholderów
+    }
+  });
+
+  it("e-mail = temat + treść z kwotą/terminem + stopka; telefon = instrukcja z kwotą", () => {
+    const email = renderReminderMessage("D-1", "EMAIL", { emailFooter: "Zespół adGen", ctx });
+    expect(email.subject).toContain("10.07.2026");
+    expect(email.body).toContain("6150,00 zł");
     expect(email.body).toContain("Zespół adGen"); // stopka doklejona
 
-    const phone = renderReminderMessage("D+2", "PHONE");
+    const phone = renderReminderMessage("D+2", "PHONE", { ctx });
+    expect(phone.body).toContain("Kwota do zapłaty: 6150,00 zł");
     expect(phone.body).toContain("Telefon z działu administracyjnego");
+  });
+
+  it("bez ctx placeholdery zastępowane myślnikiem (nie zostają {kwota})", () => {
+    const sms = renderReminderMessage("D-1", "SMS");
+    expect(sms.body).not.toContain("{");
   });
 });

@@ -193,7 +193,7 @@ function parseInvoiceInput(
 
 export async function createInvoiceAction(
   input: InvoiceFormInput
-): Promise<ActionResult> {
+): Promise<ActionResult & { id?: string }> {
   await requireAdmin();
   const result = parseInvoiceInput(input);
   if (!result.success) return fail(result.error);
@@ -210,7 +210,7 @@ export async function createInvoiceAction(
     }
   }
 
-  await db.invoice.create({
+  const created = await db.invoice.create({
     data: {
       number: d.number,
       clientId: d.clientId,
@@ -231,10 +231,11 @@ export async function createInvoiceAction(
       offerTags: d.offerTags,
       notes: d.notes,
     },
+    select: { id: true },
   });
 
   revalidatePath("/finanse/przychody");
-  return ok("Przychód został dodany");
+  return { ...ok("Przychód został dodany"), id: created.id };
 }
 
 export async function updateInvoiceAction(

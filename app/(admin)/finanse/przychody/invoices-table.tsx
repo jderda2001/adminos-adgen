@@ -803,6 +803,7 @@ export function InvoicesTable({
               <ReminderTimeline
                 invoiceId={openPosition.id}
                 dueDateIso={openPosition.dueDate}
+                grossGr={openPosition.grossGr}
                 status={openPosition.status}
                 remindersEnabled={openPosition.remindersEnabled}
                 reminders={openPosition.reminders}

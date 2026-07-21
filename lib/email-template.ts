@@ -34,7 +34,28 @@ export function renderReminderEmailHtml(opts: {
   bodyText: string;
   footerText?: string;
   hasAttachment?: boolean;
+  amountText?: string; // kwota brutto do zapłaty
+  dueText?: string; // termin płatności
 }): string {
+  // wyróżnione podsumowanie: kwota do zapłaty + termin (zawsze, jeśli podane)
+  const summaryBox =
+    opts.amountText || opts.dueText
+      ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0 18px">
+           <tr><td style="border:1px solid ${LINE};border-radius:12px;padding:16px 18px">
+             <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+               <td style="vertical-align:top">
+                 <div style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};margin-bottom:3px">Do zapłaty</div>
+                 <div style="font-size:22px;font-weight:800;color:${ACCENT};line-height:1.1">${escapeHtml(opts.amountText ?? "—")}</div>
+               </td>
+               <td style="vertical-align:top;text-align:right">
+                 <div style="font-size:11px;letter-spacing:0.5px;text-transform:uppercase;color:${MUTED};margin-bottom:3px">Termin płatności</div>
+                 <div style="font-size:16px;font-weight:700;color:${INK};line-height:1.3">${escapeHtml(opts.dueText ?? "—")}</div>
+               </td>
+             </tr></table>
+           </td></tr>
+         </table>`
+      : "";
+
   const attachmentBox = opts.hasAttachment
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0 4px">
          <tr><td style="background:#fdeadd;border:1px solid #f4c9ab;border-radius:10px;padding:12px 16px;font-size:14px;color:#9a3412;line-height:1.5">
@@ -66,6 +87,7 @@ export function renderReminderEmailHtml(opts: {
         <!-- Treść -->
         <tr><td style="padding:28px 32px 8px">
           ${paragraphs(opts.bodyText)}
+          ${summaryBox}
           ${attachmentBox}
         </td></tr>
         ${footer}
