@@ -475,7 +475,6 @@ export function CostsTable({
   adBudget: {
     monthLabel: string;
     estimateGr: number;
-    fundedGr: number;
     breakdown: {
       clientName: string;
       vertical: string;
@@ -1149,7 +1148,7 @@ export function CostsTable({
           open={adBudgetOpen}
           onOpenChange={setAdBudgetOpen}
           title="Budżet reklamowy — auto"
-          description={`${adBudget.monthLabel} · szacunek ${formatMoney(adBudget.estimateGr)} · zasilono ${formatMoney(adBudget.fundedGr)}`}
+          description={`${adBudget.monthLabel} · do wydania ${formatMoney(adBudget.estimateGr)}`}
         >
           {adBudget.breakdown.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -1197,8 +1196,10 @@ export function CostsTable({
               <p className="text-[11px] leading-snug text-muted-foreground">
                 Fioletowy pasek = leady już zabezpieczone (dostarczone lub wygenerowane,
                 czekają na przydział). Budżet „do wydania" liczymy tylko od leadów, które
-                trzeba jeszcze wygenerować (× CPL wertykału z Mety). Górny wiersz „do
-                zapłaty" to ten szacunek pomniejszony o zasilenia budżetu.
+                trzeba jeszcze wygenerować (× CPL wertykału z Mety) — maleje sam w miarę
+                generowania leadów przez Metę. Nie odejmujemy osobno zasileń budżetu, bo
+                zasilenia zamieniają się właśnie w te wygenerowane leady (odjęcie obu
+                liczyłoby ten sam wydatek dwa razy).
               </p>
             </div>
           )}

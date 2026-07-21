@@ -142,20 +142,7 @@ export default async function CostsPage({
       }),
     ]);
 
-  // od sierpnia „Budżet reklamowy" reprezentuje JEDEN auto-wiersz (szacunek −
-  // zasilenia) — pojedyncze wpisy tej kategorii chowamy z listy, a ich sumę
-  // (zasilenia) netujemy w auto-wierszu. Zasilenia = realne wpisy (bez planowanych).
-  const isAdBudgetCost = (categoryId: string) => adBudgetCatIds.has(categoryId);
-  const adBudgetFundedGr = showAutoAdBudget
-    ? costs
-        .filter((c) => !c.needsConfirmation && isAdBudgetCost(c.categoryId))
-        .reduce((s, c) => s + c.netGr, 0)
-    : 0;
-  const visibleCosts = showAutoAdBudget
-    ? costs.filter((c) => !isAdBudgetCost(c.categoryId))
-    : costs;
-
-  const rows: CostRow[] = visibleCosts.map((c) => ({
+  const rows: CostRow[] = costs.map((c) => ({
     id: c.id,
     supplierName: c.supplierName,
     supplierAccount: c.supplierAccount,
@@ -187,10 +174,12 @@ export default async function CostsPage({
   }));
 
   // wiersz-widmo „Budżet reklamowy" (auto) — jeden wyjątkowy wiersz rejestru
-  // spięty z górnym badge'em: kwota = szacunek − zasilenia (do zapłaty), fioletowy,
-  // tylko-do-odczytu; liczy się do sum i „Do zapłaty". Zasilenia (wpisy kategorii)
-  // są schowane z listy i netowane tutaj.
-  const adBudgetRemainingGr = Math.max(0, adBudgetEstimateGr - adBudgetFundedGr);
+  // spięty z górnym badge'em, fioletowy, tylko-do-odczytu. Kwota = koszt leadów,
+  // które trzeba jeszcze WYGENEROWAĆ (Σ toAcquire × CPL). Maleje sam w miarę jak
+  // Meta generuje leady (wpadają do puli → toAcquire spada) — NIE odejmujemy
+  // osobno zasileń, bo zasilenia stają się właśnie tymi wygenerowanymi leadami
+  // (odjęcie obu liczyłoby ten sam wydatek dwa razy). Realne zasilenia zostają
+  // w rejestrze jako zwykłe koszty (nie chowamy ich).
   const adBudgetCat = categories.find((c) => adBudgetCatIds.has(c.id));
   if (showAutoAdBudget && adBudgetEstimateGr > 0) {
     const monthEndIso = new Date(
@@ -203,15 +192,15 @@ export default async function CostsPage({
       docNumber: "",
       docDate: monthEndIso,
       dueDate: null,
-      netGr: adBudgetRemainingGr,
+      netGr: adBudgetEstimateGr,
       vatRate: "ZW",
       vatGr: 0,
-      grossGr: adBudgetRemainingGr, // budżet Meta = odwrotne obciążenie (netto = brutto)
+      grossGr: adBudgetEstimateGr, // budżet Meta = odwrotne obciążenie (netto = brutto)
       categoryId: adBudgetCat?.id ?? "",
       categoryName: adBudgetCat?.name ?? "Budżet reklamowy",
       clientId: null,
       clientName: null,
-      paid: adBudgetRemainingGr === 0,
+      paid: false,
       approvedForPayment: false,
       delayed: false,
       paidDate: null,
@@ -258,7 +247,6 @@ export default async function CostsPage({
           <AdBudgetAutoRow
             monthLabel={formatMonth(selectedMonth)}
             estimateGr={adBudgetEstimateGr}
-            fundedGr={adBudgetFundedGr}
           />
         )}
         {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
@@ -276,7 +264,6 @@ export default async function CostsPage({
               ? {
                   monthLabel: formatMonth(selectedMonth),
                   estimateGr: adBudgetEstimateGr,
-                  fundedGr: adBudgetFundedGr,
                   breakdown: adBudgetBreakdown,
                 }
               : null

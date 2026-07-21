@@ -141,13 +141,24 @@ function statusLabel(status: string): string {
   );
 }
 
-// Najpilniejszy status grupy: przeterminowane > wysłane > bez FV > opłacone.
+// Plakietka grupy = najpilniejszy status wśród pozycji. Kolejność od
+// najpilniejszego do „domkniętego"; „Opłacona" wygrywa TYLKO gdy wszystkie
+// pozycje są opłacone (inaczej same np. „Czekamy" fałszywie pokazałyby PAID).
+const GROUP_STATUS_PRIORITY = [
+  "OVERDUE", // przeterminowana — pieniądze po terminie
+  "ISSUED", // wystawiona — czeka na zapłatę
+  "WAITING", // czekamy — po naszej stronie
+  "NOT_ISSUED", // do wystawienia
+  "DRAFT", // bez FV / szkic
+  "NO_INVOICE", // bez faktury
+  "PAID", // opłacona — domknięte
+] as const;
+
 function groupStatus(positions: InvoiceRow[]): string {
-  const has = (s: string) => positions.some((p) => p.status === s);
-  if (has("OVERDUE")) return "OVERDUE";
-  if (has("ISSUED")) return "ISSUED";
-  if (has("DRAFT")) return "DRAFT";
-  return "PAID";
+  for (const s of GROUP_STATUS_PRIORITY) {
+    if (positions.some((p) => p.status === s)) return s;
+  }
+  return positions[0]?.status ?? "PAID"; // status spoza listy → pokaż jak jest
 }
 
 function waitedDays(row: InvoiceRow): number | null {
