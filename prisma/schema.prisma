@@ -205,12 +205,16 @@ model Cost {
   recurringCostId   String?
   recurringCost     RecurringCost? @relation(fields: [recurringCostId], references: [id], onDelete: SetNull)
   comments          CostComment[]
+  // partia importu CSV (dual-write z rachunkiem wyników) — do historii/cofania
+  rwBatchId         String?
+  rwBatch           RwImportBatch? @relation(fields: [rwBatchId], references: [id], onDelete: SetNull)
   createdAt         DateTime  @default(now())
 
   @@index([docDate])
   @@index([clientId])
   @@index([categoryId])
   @@index([paid])
+  @@index([rwBatchId])
 }
 
 // Komentarz do kosztu — historia z autorem (kto i kiedy). authorName to snapshot
@@ -469,6 +473,7 @@ model RwImportBatch {
   createdAt    DateTime @default(now())
 
   entries RwEntry[]
+  costs   Cost[] // dokumenty Cost z tej partii (import kosztów dual-write)
 }
 
 model RwEntry {

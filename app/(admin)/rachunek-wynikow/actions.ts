@@ -634,10 +634,13 @@ export async function deleteRwBatchAction(batchId: string): Promise<ActionResult
   if (!batch) return fail("Import nie istnieje");
 
   await db.$transaction([
+    // partie KOSZT to dual-write z rejestrem Kosztów — usuń też mirror-dokumenty Cost
+    db.cost.deleteMany({ where: { rwBatchId: batchId } }),
     db.rwEntry.deleteMany({ where: { batchId } }),
     db.rwImportBatch.delete({ where: { id: batchId } }),
   ]);
   revalidatePath(RW_PATH);
+  revalidatePath("/finanse/koszty");
   return ok(`Cofnięto import „${batch.filename}” (${batch.rowCount} wierszy)`);
 }
 

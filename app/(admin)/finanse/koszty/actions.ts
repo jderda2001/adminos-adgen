@@ -983,6 +983,7 @@ export async function commitCostImportAction(input: {
           approvedForPayment: true,
           needsConfirmation: false,
           note: "import CSV",
+          rwBatchId: batch.id,
         };
       }),
     });
@@ -993,4 +994,27 @@ export async function commitCostImportAction(input: {
   revalidatePath(ESTYMACJE_PATH);
   const years = [...new Set(prepared.map((p) => p.year))].sort((a, b) => a - b);
   return { ok: true, imported: prepared.length, years };
+}
+
+/**
+ * Cofnięcie partii importu kosztów (dual-write): usuwa dokumenty Cost tej partii
+ * ORAZ mirror-wpisy RwEntry i samą partię — oba rejestry wracają do stanu sprzed
+ * importu. Bezpieczne dla starych partii bez podpiętych kosztów (usunie 0 Cost).
+ */
+export async function deleteCostImportBatchAction(batchId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const batch = await db.rwImportBatch.findUnique({ where: { id: batchId } });
+  if (!batch) return fail("Import nie istnieje");
+
+  const [{ count: costCount }] = await db.$transaction([
+    db.cost.deleteMany({ where: { rwBatchId: batchId } }),
+    db.rwEntry.deleteMany({ where: { batchId } }),
+    db.rwImportBatch.delete({ where: { id: batchId } }),
+  ]);
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(RW_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  return ok(`Cofnięto import „${batch.filename}” (${costCount} kosztów)`);
 }

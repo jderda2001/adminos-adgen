@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/page-header";
 import { buildCostFilters, type CostFilterParams } from "./filters";
 import { CostsTable, type CostRow } from "./costs-table";
 import { PendingCosts, type PendingCostRow } from "./pending-costs";
+import { CostImportsSheet, type CostImportRowInfo } from "./cost-imports-sheet";
 import type { RecurringRow } from "./recurring-dialog";
 
 export const metadata: Metadata = { title: "Koszty" };
@@ -50,10 +51,21 @@ export default async function CostsPage({
   // tabela per miesiąc pokazuje też zaplanowane przyszłe kopie (estymacja)
   const { where, period } = buildCostFilters(filters, { plannedFrom: nextMonthStart });
 
+  // tryb „podgląd importu": ?import=<batchId> filtruje rejestr do wierszy danej
+  // partii CSV (do edycji inline), ignorując filtr okresu i wyłączając auto-budżet
+  const importId = first(raw.import);
+  const importBatch = importId
+    ? await db.rwImportBatch.findUnique({
+        where: { id: importId },
+        select: { filename: true },
+      })
+    : null;
+  const importMode = Boolean(importBatch);
+
   // miesiąc wybrany w filtrze (dla auto-budżetu i VAT); auto-budżet testowo od 08/2026
   const selectedMonth = monthKey(period.from);
   const AUTO_AD_BUDGET_FROM = "2026-08";
-  const showAutoAdBudget = selectedMonth >= AUTO_AD_BUDGET_FROM;
+  const showAutoAdBudget = !importMode && selectedMonth >= AUTO_AD_BUDGET_FROM;
   const [adBudgetCatIds, fulfillment] = await Promise.all([
     getAdBudgetCategoryIds(),
     showAutoAdBudget ? getLeadFulfillment(selectedMonth) : null,
@@ -108,7 +120,7 @@ export default async function CostsPage({
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
       db.cost.findMany({
-        where,
+        where: importMode ? { rwBatchId: importId } : where,
         include: {
           category: true,
           client: true,
@@ -233,14 +245,50 @@ export default async function CostsPage({
   const categoryOptions = categories.map((c) => ({ id: c.id, name: c.name }));
   const supplierNames = suppliers.map((s) => s.supplierName);
 
+  // Historia importów kosztów: partie KOSZT z liczbą podpiętych dokumentów
+  // (pokazujemy tylko te, które faktycznie dodały koszty do rejestru).
+  const batches = await db.rwImportBatch.findMany({
+    where: { kind: "KOSZT" },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, filename: true, createdAt: true },
+  });
+  const batchCounts = await db.cost.groupBy({
+    by: ["rwBatchId"],
+    where: { rwBatchId: { in: batches.map((b) => b.id) } },
+    _count: { _all: true },
+  });
+  const countByBatch = new Map(batchCounts.map((g) => [g.rwBatchId, g._count._all]));
+  const costImports: CostImportRowInfo[] = batches
+    .map((b) => ({
+      id: b.id,
+      filename: b.filename,
+      createdAt: b.createdAt.toISOString(),
+      costCount: countByBatch.get(b.id) ?? 0,
+    }))
+    .filter((b) => b.costCount > 0);
+
   return (
     <>
       <PageHeader
         title="Koszty"
         description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
-      />
+      >
+        {costImports.length > 0 && <CostImportsSheet imports={costImports} />}
+      </PageHeader>
       <div className="space-y-4">
-        {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
+        {importBatch && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
+            <span>
+              Podgląd importu:{" "}
+              <span className="font-medium">{importBatch.filename}</span> —{" "}
+              {rows.length} {rows.length === 1 ? "wiersz" : "wierszy"} do edycji inline.
+            </span>
+            <a href="/finanse/koszty" className="font-medium text-primary hover:underline">
+              Wyczyść filtr
+            </a>
+          </div>
+        )}
+        {!importMode && pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
         <CostsTable
           costs={rows}
           categories={categoryOptions}
