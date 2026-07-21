@@ -5,7 +5,6 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
-import { getSettings } from "@/lib/settings";
 import { sendEmail, sendSms } from "@/lib/notify";
 import { renderReminderEmailHtml } from "@/lib/email-template";
 import { readAttachmentBuffer, readEmailLogo } from "@/lib/attachments";
@@ -55,28 +54,22 @@ export async function sendReminderStepAction(input: {
     );
   }
 
-  const settings = await getSettings();
-  const footer = [settings.company_name, settings.company_address, settings.reminder_email_footer]
-    .filter(Boolean)
-    .join("\n");
   // kwota brutto + termin płatności trafiają do KAŻDEJ treści (SMS/e-mail)
   const ctx = { amountGr: invoice.grossGr, dueDate: invoice.dueDate };
-  // wersja tekstowa (fallback + snapshot w bazie) — z doklejoną stopką
-  const msg = renderReminderMessage(stepKey, channel, { emailFooter: footer, ctx });
+  const msg = renderReminderMessage(stepKey, channel, { ctx });
 
   let result;
   if (channel === "SMS") {
     result = await sendSms({ to, body: msg.body });
   } else {
     // e-mail: brandowany HTML (styl Apple, logo inline) + załącznik faktury
-    const raw = renderReminderMessage(stepKey, "EMAIL", { ctx }); // treść bez stopki
+    const raw = renderReminderMessage(stepKey, "EMAIL", { ctx });
     const file = await readAttachmentBuffer(invoice.attachmentPath, invoice.attachmentName);
     const logo = await readEmailLogo();
     const LOGO_CID = "adgen-logo";
     const html = renderReminderEmailHtml({
       subject: raw.subject ?? "",
       bodyText: raw.body,
-      footerText: footer,
       hasAttachment: Boolean(file),
       amountText: formatMoney(invoice.grossGr),
       dueText: formatDate(invoice.dueDate),

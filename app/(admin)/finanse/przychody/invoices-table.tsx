@@ -483,6 +483,28 @@ export function InvoicesTable({
           ),
       },
       {
+        id: "revenueShare",
+        header: () => <div className="text-right">% przychodów</div>,
+        enableSorting: false,
+        meta: { align: "right" },
+        cell: ({ row }) => {
+          const pct = totals.netGr > 0 ? (row.original.netGr / totals.netGr) * 100 : 0;
+          return (
+            <div className="flex flex-col items-end gap-1">
+              <span className="font-medium tabular-nums">
+                {pct.toFixed(1).replace(".", ",")}%
+              </span>
+              <span className="block h-1 w-14 overflow-hidden rounded-full bg-muted">
+                <span
+                  className="block h-full rounded-full bg-primary/60"
+                  style={{ width: `${Math.min(100, pct)}%` }}
+                />
+              </span>
+            </div>
+          );
+        },
+      },
+      {
         id: "chevron",
         header: "",
         enableSorting: false,
@@ -493,7 +515,7 @@ export function InvoicesTable({
         ),
       },
     ],
-    []
+    [totals.netGr]
   );
 
   const newInvoiceTrigger = (
@@ -598,7 +620,9 @@ export function InvoicesTable({
             <TableCell className="text-right font-medium tabular-nums">
               {formatMoney(totals.grossGr)}
             </TableCell>
-            <TableCell colSpan={2} />
+            <TableCell />
+            <TableCell className="text-right font-medium tabular-nums">100%</TableCell>
+            <TableCell />
           </>
         }
         emptyState={
