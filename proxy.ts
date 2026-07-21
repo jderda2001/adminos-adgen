@@ -34,7 +34,9 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // wszystko poza zasobami statycznymi
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // wszystko poza zasobami statycznymi ORAZ trasami cron (te bronią się
+    // własnym nagłówkiem x-cron-secret — proxy nie może ich przekierować na
+    // /login, bo są wołane bezsesyjnie z crontab/systemd)
+    "/((?!_next/static|_next/image|favicon.ico|api/cron|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
