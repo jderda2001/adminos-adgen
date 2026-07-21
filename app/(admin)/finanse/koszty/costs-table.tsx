@@ -479,8 +479,10 @@ export function CostsTable({
     breakdown: {
       clientName: string;
       vertical: string;
-      leads: number;
       cplGr: number | null;
+      owed: number;
+      secured: number;
+      toAcquire: number;
       budgetGr: number;
     }[];
   } | null;
@@ -1155,42 +1157,48 @@ export function CostsTable({
               paczek leadów w Przychodach.
             </p>
           ) : (
-            <div>
-              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b pb-1.5 text-xs font-medium text-muted-foreground">
-                <span>Klient · wertykał</span>
-                <span className="text-right">Leady</span>
-                <span className="text-right">Budżet</span>
-              </div>
-              {adBudget.breakdown.map((b, i) => (
-                <div
-                  key={`${b.clientName}|${b.vertical}|${i}`}
-                  className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 border-b border-border/50 py-2 text-sm"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium">{b.clientName}</span>
-                    <span className="block text-xs text-muted-foreground">
+            <div className="space-y-3">
+              {adBudget.breakdown.map((b, i) => {
+                const pct = b.owed > 0 ? Math.min(100, Math.round((b.secured / b.owed) * 100)) : 0;
+                return (
+                  <div key={`${b.clientName}|${b.vertical}|${i}`} className="border-b border-border/50 pb-3">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="min-w-0 truncate text-sm font-medium">{b.clientName}</span>
+                      <span className="shrink-0 text-sm font-semibold tabular-nums">
+                        {formatMoney(b.budgetGr)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
                       {b.vertical}
                       {b.cplGr !== null && ` · CPL ${formatMoney(b.cplGr)}`}
-                    </span>
-                  </span>
-                  <span className="text-right tabular-nums">{b.leads}</span>
-                  <span className="text-right font-medium tabular-nums">
-                    {formatMoney(b.budgetGr)}
-                  </span>
-                </div>
-              ))}
-              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 pt-2 text-sm font-semibold">
-                <span>Razem</span>
-                <span className="text-right tabular-nums">
-                  {adBudget.breakdown.reduce((s, b) => s + b.leads, 0)}
+                    </div>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-purple-500 transition-[width] dark:bg-purple-400"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 flex justify-between text-[11px] text-muted-foreground tabular-nums">
+                      <span>
+                        zabezpieczone <span className="text-purple-700 dark:text-purple-300">{b.secured}</span> / {b.owed}
+                      </span>
+                      <span>do pozyskania {b.toAcquire}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="flex items-baseline justify-between pt-1 text-sm font-semibold tabular-nums">
+                <span>
+                  Razem · do pozyskania{" "}
+                  {adBudget.breakdown.reduce((s, b) => s + b.toAcquire, 0)} leadów
                 </span>
-                <span className="text-right tabular-nums">
-                  {formatMoney(adBudget.breakdown.reduce((s, b) => s + b.budgetGr, 0))}
-                </span>
+                <span>{formatMoney(adBudget.breakdown.reduce((s, b) => s + b.budgetGr, 0))}</span>
               </div>
-              <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
-                Budżet na klienta = leady do dostarczenia × CPL wertykału (z Mety).
-                Górny wiersz „do zapłaty" to szacunek pomniejszony o zasilenia.
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Fioletowy pasek = leady już zabezpieczone (dostarczone lub wygenerowane,
+                czekają na przydział). Budżet „do wydania" liczymy tylko od leadów, które
+                trzeba jeszcze wygenerować (× CPL wertykału z Mety). Górny wiersz „do
+                zapłaty" to ten szacunek pomniejszony o zasilenia budżetu.
               </p>
             </div>
           )}

@@ -60,18 +60,42 @@ export default async function CostsPage({
     showAutoAdBudget ? getLeadFulfillment(selectedMonth) : null,
   ]);
 
-  // rozbicie budżetu na klientów (szczegóły auto-wiersza): budżet = leady × CPL.
-  // Szacunek miesiąca = suma tych budżetów (spina się z rozbiciem co do grosza).
-  const adBudgetBreakdown = (fulfillment?.statuses ?? [])
+  // rozbicie budżetu na klientów (szczegóły auto-wiersza). Budżet DO WYDANIA to
+  // leady, które trzeba jeszcze WYGENEROWAĆ × CPL — z równania wypadają:
+  //  • leady już dostarczone klientowi (deliveredThisMonth),
+  //  • leady już wygenerowane, ale jeszcze nierozdane (pula wertykału) — te lada
+  //    moment trafią do klientów, więc budżetu na nie wydawać nie trzeba.
+  // Pula wertykału (generated − assigned) rozdzielana proporcjonalnie do salda.
+  const stmts = fulfillment?.statuses ?? [];
+  const assignedByV: Record<string, number> = {};
+  const balSumByV: Record<string, number> = {};
+  for (const s of stmts) {
+    assignedByV[s.vertical] = (assignedByV[s.vertical] ?? 0) + s.deliveredThisMonth;
+    if (s.balance > 0) balSumByV[s.vertical] = (balSumByV[s.vertical] ?? 0) + s.balance;
+  }
+  const poolByV: Record<string, number> = {};
+  for (const [v, gen] of Object.entries(fulfillment?.generatedByVertical ?? {})) {
+    poolByV[v] = Math.max(0, gen - (assignedByV[v] ?? 0));
+  }
+  const adBudgetBreakdown = stmts
     .filter((s) => s.owed > 0)
     .map((s) => {
       const cplGr = fulfillment!.cplByVertical[s.vertical] ?? null;
+      const bal = Math.max(0, s.balance);
+      const balSum = balSumByV[s.vertical] ?? 0;
+      const pool = poolByV[s.vertical] ?? 0;
+      // udział klienta w puli wygenerowanej (proporcjonalnie do salda, ≤ saldo)
+      const poolShare = balSum > 0 ? Math.min(bal, Math.round((pool * bal) / balSum)) : 0;
+      const secured = Math.min(s.owed, s.deliveredThisMonth + poolShare); // już „w ręku"
+      const toAcquire = Math.max(0, s.owed - secured); // do wygenerowania = budżet
       return {
         clientName: s.clientName,
         vertical: s.vertical,
-        leads: s.owed,
         cplGr,
-        budgetGr: cplGr !== null ? Math.round(s.owed * cplGr) : 0,
+        owed: s.owed,
+        secured,
+        toAcquire,
+        budgetGr: cplGr !== null ? Math.round(toAcquire * cplGr) : 0,
       };
     })
     .sort((a, b) => b.budgetGr - a.budgetGr);
