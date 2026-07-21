@@ -152,15 +152,15 @@ describe("buildFulfillmentPlan", () => {
   });
 
   it("pula wygenerowanych pokrywa dług → 0 do wygenerowania, 0 zł (scenariusz z ekranu)", () => {
-    // Służebności przesyłu: wygenerowane 594, przypisane 306, dług 159, CPL 2,60 zł.
-    // 288 leży nieprzypisanych → pokrywają 159, więc nie generujemy nic.
+    // Służebności przesyłu: dług 159, CPL 2,60 zł, pula 288 (wygenerowane 594 −
+    // dostarczone 306) → pokrywa 159, więc nie generujemy nic.
     const statuses = [
       { clientId: "a", vertical: "SP", contractedThisMonth: 465, deliveredThisMonth: 306, carriedIn: 0, owed: 465, balance: 159 },
     ];
-    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, { SP: 40_000 }, { SP: 594 });
+    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, { SP: 40_000 }, { SP: 288 });
     const sp = plan.verticals.find((v) => v.vertical === "SP")!;
     expect(sp.remaining).toBe(159); // dług wobec klientów wciąż widoczny
-    expect(sp.pool).toBe(288); // 594 − 306
+    expect(sp.pool).toBe(288);
     expect(sp.toGenerate).toBe(0); // pula pokrywa dług
     expect(sp.neededSpendGr).toBe(0);
     expect(sp.budgetIncreaseGr).toBe(0);
@@ -171,16 +171,30 @@ describe("buildFulfillmentPlan", () => {
     const statuses = [
       { clientId: "a", vertical: "SP", contractedThisMonth: 700, deliveredThisMonth: 306, carriedIn: 0, owed: 700, balance: 394 },
     ];
-    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, {}, { SP: 594 });
+    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, {}, { SP: 288 });
     const sp = plan.verticals.find((v) => v.vertical === "SP")!;
     expect(sp.remaining).toBe(394);
-    expect(sp.pool).toBe(288); // 594 − 306
+    expect(sp.pool).toBe(288);
     expect(sp.toGenerate).toBe(106); // 394 − 288
     expect(sp.neededSpendGr).toBe(106 * 260);
     expect(sp.budgetIncreaseGr).toBe(106 * 260);
   });
 
-  it("bez generatedByVertical (pominięty) pula=0 → zachowanie jak dawniej", () => {
+  it("pula przeniesiona z poprzedniego miesiąca (narastająco) pokrywa dług", () => {
+    // W tym miesiącu nic nie wygenerowano, ale z poprzednich miesięcy leży 80.
+    // Caller podaje pulę narastająco (cumGen − cumDel) = 80.
+    const statuses = [
+      { clientId: "a", vertical: "OZE", contractedThisMonth: 0, deliveredThisMonth: 0, carriedIn: 60, owed: 60, balance: 60 },
+    ];
+    const plan = buildFulfillmentPlan(statuses, { OZE: 3000 }, {}, { OZE: 80 });
+    const oze = plan.verticals.find((v) => v.vertical === "OZE")!;
+    expect(oze.remaining).toBe(60);
+    expect(oze.pool).toBe(80); // przeniesione z poprzedniego miesiąca
+    expect(oze.toGenerate).toBe(0);
+    expect(oze.budgetIncreaseGr).toBe(0);
+  });
+
+  it("bez poolByVertical (pominięty) pula=0 → zachowanie jak dawniej", () => {
     const statuses = [
       { clientId: "a", vertical: "SKD", contractedThisMonth: 100, deliveredThisMonth: 40, carriedIn: 0, owed: 100, balance: 60 },
     ];

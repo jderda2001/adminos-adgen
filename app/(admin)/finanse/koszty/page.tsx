@@ -60,45 +60,43 @@ export default async function CostsPage({
     showAutoAdBudget ? getLeadFulfillment(selectedMonth) : null,
   ]);
 
-  // rozbicie budżetu na klientów (szczegóły auto-wiersza). Budżet DO WYDANIA to
-  // leady, które trzeba jeszcze WYGENEROWAĆ × CPL — z równania wypadają:
-  //  • leady już dostarczone klientowi (deliveredThisMonth),
-  //  • leady już wygenerowane, ale jeszcze nierozdane (pula wertykału) — te lada
-  //    moment trafią do klientów, więc budżetu na nie wydawać nie trzeba.
-  // Pula wertykału (generated − assigned) rozdzielana proporcjonalnie do salda.
+  // rozbicie budżetu per MARKA × WERTYKAL (nie klient). Kontrakt (owed) rozkłada
+  // się na trzy części paska: dostarczone (fiolet) + pula wygenerowanych-
+  // nieprzypisanych pokrywających dług (niebieski) + do wygenerowania (szary).
+  // owed = delivered + fromPool + toGenerate. Budżet DO WYDANIA = toGenerate ×
+  // CPL — pulę (narastającą, z przeniesieniem) bierze z planu realizacji.
   const stmts = fulfillment?.statuses ?? [];
-  const assignedByV: Record<string, number> = {};
-  const balSumByV: Record<string, number> = {};
+  const planByV = new Map((fulfillment?.plan.verticals ?? []).map((v) => [v.vertical, v]));
+  const brandsByV = fulfillment?.brandsByVertical ?? {};
+  const aggByV: Record<string, { owed: number; delivered: number }> = {};
   for (const s of stmts) {
-    assignedByV[s.vertical] = (assignedByV[s.vertical] ?? 0) + s.deliveredThisMonth;
-    if (s.balance > 0) balSumByV[s.vertical] = (balSumByV[s.vertical] ?? 0) + s.balance;
+    const owedPos = Math.max(0, s.owed);
+    const a = (aggByV[s.vertical] ??= { owed: 0, delivered: 0 });
+    a.owed += owedPos;
+    a.delivered += Math.min(s.deliveredThisMonth, owedPos); // obcięte do zobowiązania
   }
-  const poolByV: Record<string, number> = {};
-  for (const [v, gen] of Object.entries(fulfillment?.generatedByVertical ?? {})) {
-    poolByV[v] = Math.max(0, gen - (assignedByV[v] ?? 0));
-  }
-  const adBudgetBreakdown = stmts
-    .filter((s) => s.owed > 0)
-    .map((s) => {
-      const cplGr = fulfillment!.cplByVertical[s.vertical] ?? null;
-      const bal = Math.max(0, s.balance);
-      const balSum = balSumByV[s.vertical] ?? 0;
-      const pool = poolByV[s.vertical] ?? 0;
-      // udział klienta w puli wygenerowanej (proporcjonalnie do salda, ≤ saldo)
-      const poolShare = balSum > 0 ? Math.min(bal, Math.round((pool * bal) / balSum)) : 0;
-      const secured = Math.min(s.owed, s.deliveredThisMonth + poolShare); // już „w ręku"
-      const toAcquire = Math.max(0, s.owed - secured); // do wygenerowania = budżet
+  const adBudgetBreakdown = Object.entries(aggByV)
+    .filter(([, a]) => a.owed > 0)
+    .map(([vertical, a]) => {
+      const p = planByV.get(vertical);
+      const remaining = a.owed - a.delivered; // dług do dowiezienia
+      const fromPool = Math.min(p?.pool ?? 0, remaining); // niebieski — pokryte z puli
+      const toGenerate = Math.max(0, remaining - fromPool); // szary — do wygenerowania
+      const cplGr = p?.cplGr ?? fulfillment!.cplByVertical[vertical] ?? null;
+      const budgetGr =
+        p?.budgetIncreaseGr ?? (cplGr !== null ? Math.round(toGenerate * cplGr) : 0);
       return {
-        clientName: s.clientName,
-        vertical: s.vertical,
+        vertical,
+        brandLabel: (brandsByV[vertical] ?? []).join(" + ") || "—",
         cplGr,
-        owed: s.owed,
-        secured,
-        toAcquire,
-        budgetGr: cplGr !== null ? Math.round(toAcquire * cplGr) : 0,
+        owed: a.owed,
+        delivered: a.delivered, // fiolet
+        fromPool, // niebieski
+        toGenerate, // szary
+        budgetGr,
       };
     })
-    .sort((a, b) => b.budgetGr - a.budgetGr);
+    .sort((x, y) => y.budgetGr - x.budgetGr || y.owed - x.owed);
   const adBudgetEstimateGr = adBudgetBreakdown.reduce((s, b) => s + b.budgetGr, 0);
   // VAT idzie za WYBRANYM okresem: miesiąc PRZED początkiem okresu (przeglądając
   // sierpień widzisz VAT za lipiec — kwotę odłożoną, płatną do US w tym miesiącu)

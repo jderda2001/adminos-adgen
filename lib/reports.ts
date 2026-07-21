@@ -1169,6 +1169,7 @@ export interface LeadFulfillment {
   plan: FulfillmentPlan; // brakujące × CPL → needed spend + wzrost budżetu per wertykal
   cplByVertical: Record<string, number | null>; // CPL z ostatniego okresu
   generatedByVertical: Record<string, number>; // leady WYGENEROWANE w tym miesiącu (Σ kampanii)
+  brandsByVertical: Record<string, string[]>; // marki generujące dany wertykal (etykiety)
   spentTotalGr: number; // Σ wydane w Mecie w tym miesiącu
   daysLeft: number;
 }
@@ -1185,13 +1186,14 @@ async function computeFulfillment(month: string): Promise<{
   plan: FulfillmentPlan;
   cplByVertical: Record<string, number | null>;
   generatedByVertical: Record<string, number>;
+  brandsByVertical: Record<string, string[]>;
   spentTotalGr: number;
   daysLeft: number;
 }> {
   const monthEnd = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)), 1));
   const prev = shiftMonth(month, -1);
 
-  const [leadInvoices, deliveries, trailingCampaigns, clients] = await Promise.all([
+  const [leadInvoices, deliveries, trailingCampaigns, cumCampaigns, clients] = await Promise.all([
     // faktury leadowe do końca wybranego miesiąca (kontrakt narastająco)
     db.invoice.findMany({
       where: {
@@ -1216,6 +1218,12 @@ async function computeFulfillment(month: string): Promise<{
     db.leadCampaignMonth.findMany({
       where: { period: { in: [prev, month] } },
       select: { period: true, vertical: true, spendGr: true, leadsCount: true },
+    }),
+    // WSZYSTKIE kampanie do końca miesiąca (≤ month) — do puli NARASTAJĄCEJ
+    // (nieprzypisane leady przechodzą z poprzednich miesięcy) i etykiet marek
+    db.leadCampaignMonth.findMany({
+      where: { period: { lte: month } },
+      select: { vertical: true, leadsCount: true, brand: { select: { name: true } } },
     }),
     db.client.findMany({ select: { id: true, name: true } }),
   ]);
@@ -1262,12 +1270,30 @@ async function computeFulfillment(month: string): Promise<{
   const cplByVertical: Record<string, number | null> = {};
   for (const [v, t] of trail) cplByVertical[v] = t.leadsCount > 0 ? Math.round(t.spendGr / t.leadsCount) : null;
 
-  const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical, generatedByVertical);
+  // Pula NARASTAJĄCA: nieprzypisane leady przechodzą z poprzednich miesięcy.
+  // pool = Σ wygenerowanych (≤ month) − Σ dostarczonych (≤ month), per wertykal (≥0).
+  // Etykiety marek (marka × wertykal) też z pełnej historii kampanii.
+  const cumGenByV: Record<string, number> = {};
+  const brandsByVertical: Record<string, string[]> = {};
+  for (const c of cumCampaigns) {
+    cumGenByV[c.vertical] = (cumGenByV[c.vertical] ?? 0) + c.leadsCount;
+    const list = (brandsByVertical[c.vertical] ??= []);
+    if (!list.includes(c.brand.name)) list.push(c.brand.name);
+  }
+  const cumDelByV: Record<string, number> = {};
+  for (const d of deliveries) cumDelByV[d.vertical] = (cumDelByV[d.vertical] ?? 0) + d.leadsCount;
+  const poolByVertical: Record<string, number> = {};
+  for (const v of new Set([...Object.keys(cumGenByV), ...Object.keys(cumDelByV)])) {
+    poolByVertical[v] = Math.max(0, (cumGenByV[v] ?? 0) - (cumDelByV[v] ?? 0));
+  }
+
+  const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical, poolByVertical);
   return {
     statuses,
     plan,
     cplByVertical,
     generatedByVertical,
+    brandsByVertical,
     spentTotalGr,
     daysLeft: daysLeftInMonth(month, todayUTC()),
   };
@@ -1282,6 +1308,7 @@ export async function getLeadFulfillment(month: string): Promise<LeadFulfillment
     plan: f.plan,
     cplByVertical: f.cplByVertical,
     generatedByVertical: f.generatedByVertical,
+    brandsByVertical: f.brandsByVertical,
     spentTotalGr: f.spentTotalGr,
     daysLeft: f.daysLeft,
   };

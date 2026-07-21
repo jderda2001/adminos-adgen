@@ -98,12 +98,14 @@ export default async function LeadNichePage({
 
   const generated = fulfillment.generatedByVertical[vertical] ?? 0;
   const assigned = rows.reduce((n, r) => n + r.delivered, 0);
-  const unassigned = generated - assigned;
+  const plan = fulfillment.plan.verticals.find((v) => v.vertical === vertical);
+  // „leżą" = pula NARASTAJĄCA (nieprzypisane z poprzednich miesięcy przechodzą),
+  // nie tylko generated−assigned tego miesiąca
+  const unassigned = plan?.pool ?? Math.max(0, generated - assigned);
   // pasek dowiezienia bez nettowania nadwyżek między klientami:
   // covered = Σ min(dowiezione, zobowiązanie), owed = Σ dodatnich zobowiązań
   const owed = rows.reduce((n, r) => n + Math.max(0, r.owed), 0);
   const covered = rows.reduce((n, r) => n + Math.min(r.delivered, Math.max(0, r.owed)), 0);
-  const plan = fulfillment.plan.verticals.find((v) => v.vertical === vertical);
   const remaining = plan?.remaining ?? 0; // dług wobec klientów (do dowiezienia)
   const toGenerate = plan?.toGenerate ?? 0; // do WYGENEROWANIA (po odjęciu puli)
   const addSpendGr = plan?.budgetIncreaseGr ?? 0;

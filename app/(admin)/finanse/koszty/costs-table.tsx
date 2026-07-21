@@ -476,12 +476,13 @@ export function CostsTable({
     monthLabel: string;
     estimateGr: number;
     breakdown: {
-      clientName: string;
       vertical: string;
+      brandLabel: string;
       cplGr: number | null;
       owed: number;
-      secured: number;
-      toAcquire: number;
+      delivered: number; // fiolet — przypisane klientom (dostarczone)
+      fromPool: number; // niebieski — pokryte z puli wygenerowanych-nieprzypisanych
+      toGenerate: number; // szary — jeszcze do wygenerowania
       budgetGr: number;
     }[];
   } | null;
@@ -726,8 +727,8 @@ export function CostsTable({
               <Button
                 variant="ghost"
                 size="icon-sm"
-                title="Rozbicie na klientów"
-                aria-label="Rozbicie budżetu na klientów"
+                title="Rozbicie na marki i wertykały"
+                aria-label="Rozbicie budżetu na marki i wertykały"
                 className="text-purple-700 hover:text-purple-900 dark:text-purple-300"
                 onClick={() => setAdBudgetOpen(true)}
               >
@@ -1142,7 +1143,7 @@ export function CostsTable({
         )}
       </DetailSheet>
 
-      {/* ── Rozbicie budżetu reklamowego na klientów ────────────── */}
+      {/* ── Rozbicie budżetu reklamowego per marka × wertykal ─────── */}
       {adBudget && (
         <DetailSheet
           open={adBudgetOpen}
@@ -1158,11 +1159,13 @@ export function CostsTable({
           ) : (
             <div className="space-y-3">
               {adBudget.breakdown.map((b, i) => {
-                const pct = b.owed > 0 ? Math.min(100, Math.round((b.secured / b.owed) * 100)) : 0;
+                const total = b.owed > 0 ? b.owed : 1;
+                const purplePct = Math.min(100, (b.delivered / total) * 100);
+                const bluePct = Math.min(100 - purplePct, (b.fromPool / total) * 100);
                 return (
-                  <div key={`${b.clientName}|${b.vertical}|${i}`} className="border-b border-border/50 pb-3">
+                  <div key={`${b.vertical}|${i}`} className="border-b border-border/50 pb-3">
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="min-w-0 truncate text-sm font-medium">{b.clientName}</span>
+                      <span className="min-w-0 truncate text-sm font-medium">{b.brandLabel}</span>
                       <span className="shrink-0 text-sm font-semibold tabular-nums">
                         {formatMoney(b.budgetGr)}
                       </span>
@@ -1171,35 +1174,45 @@ export function CostsTable({
                       {b.vertical}
                       {b.cplGr !== null && ` · CPL ${formatMoney(b.cplGr)}`}
                     </div>
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    {/* pasek: fiolet=przypisane, niebieski=wygenerowane-nieprzypisane, szary=do wygenerowania */}
+                    <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full rounded-full bg-purple-500 transition-[width] dark:bg-purple-400"
-                        style={{ width: `${pct}%` }}
+                        className="h-full bg-purple-500 transition-[width] dark:bg-purple-400"
+                        style={{ width: `${purplePct}%` }}
+                      />
+                      <div
+                        className="h-full bg-blue-400 transition-[width] dark:bg-blue-500"
+                        style={{ width: `${bluePct}%` }}
                       />
                     </div>
-                    <div className="mt-1 flex justify-between text-[11px] text-muted-foreground tabular-nums">
+                    <div className="mt-1 flex flex-wrap justify-between gap-x-3 text-[11px] text-muted-foreground tabular-nums">
                       <span>
-                        zabezpieczone <span className="text-purple-700 dark:text-purple-300">{b.secured}</span> / {b.owed}
+                        <span className="text-purple-600 dark:text-purple-300">■</span> przypisane {b.delivered}
+                        {b.fromPool > 0 && (
+                          <>
+                            {" · "}
+                            <span className="text-blue-500 dark:text-blue-300">■</span> z puli {b.fromPool}
+                          </>
+                        )}
                       </span>
-                      <span>do pozyskania {b.toAcquire}</span>
+                      <span>do wygenerowania {b.toGenerate} / {b.owed}</span>
                     </div>
                   </div>
                 );
               })}
               <div className="flex items-baseline justify-between pt-1 text-sm font-semibold tabular-nums">
                 <span>
-                  Razem · do pozyskania{" "}
-                  {adBudget.breakdown.reduce((s, b) => s + b.toAcquire, 0)} leadów
+                  Razem · do wygenerowania{" "}
+                  {adBudget.breakdown.reduce((s, b) => s + b.toGenerate, 0)} leadów
                 </span>
                 <span>{formatMoney(adBudget.breakdown.reduce((s, b) => s + b.budgetGr, 0))}</span>
               </div>
               <p className="text-[11px] leading-snug text-muted-foreground">
-                Fioletowy pasek = leady już zabezpieczone (dostarczone lub wygenerowane,
-                czekają na przydział). Budżet „do wydania" liczymy tylko od leadów, które
-                trzeba jeszcze wygenerować (× CPL wertykału z Mety) — maleje sam w miarę
-                generowania leadów przez Metę. Nie odejmujemy osobno zasileń budżetu, bo
-                zasilenia zamieniają się właśnie w te wygenerowane leady (odjęcie obu
-                liczyłoby ten sam wydatek dwa razy).
+                Pasek per marka × wertykal: <span className="text-purple-600 dark:text-purple-300">fiolet</span> = leady
+                przypisane klientom, <span className="text-blue-500 dark:text-blue-300">niebieski</span> = już
+                wygenerowane, ale jeszcze nieprzypisane (leżą — przechodzą z poprzednich miesięcy), szara
+                reszta = jeszcze do wygenerowania. Budżet „do wydania" = szara część × CPL — nie płacimy za
+                to, co już leży w puli.
               </p>
             </div>
           )}
