@@ -1262,7 +1262,7 @@ async function computeFulfillment(month: string): Promise<{
   const cplByVertical: Record<string, number | null> = {};
   for (const [v, t] of trail) cplByVertical[v] = t.leadsCount > 0 ? Math.round(t.spendGr / t.leadsCount) : null;
 
-  const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical);
+  const plan = buildFulfillmentPlan(statuses, cplByVertical, spentByVertical, generatedByVertical);
   return {
     statuses,
     plan,

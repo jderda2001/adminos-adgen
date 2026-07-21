@@ -150,4 +150,44 @@ describe("buildFulfillmentPlan", () => {
     expect(skd.budgetIncreaseGr).toBe(0);
     expect(plan.totalSpentGr).toBe(50_000);
   });
+
+  it("pula wygenerowanych pokrywa dług → 0 do wygenerowania, 0 zł (scenariusz z ekranu)", () => {
+    // Służebności przesyłu: wygenerowane 594, przypisane 306, dług 159, CPL 2,60 zł.
+    // 288 leży nieprzypisanych → pokrywają 159, więc nie generujemy nic.
+    const statuses = [
+      { clientId: "a", vertical: "SP", contractedThisMonth: 465, deliveredThisMonth: 306, carriedIn: 0, owed: 465, balance: 159 },
+    ];
+    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, { SP: 40_000 }, { SP: 594 });
+    const sp = plan.verticals.find((v) => v.vertical === "SP")!;
+    expect(sp.remaining).toBe(159); // dług wobec klientów wciąż widoczny
+    expect(sp.pool).toBe(288); // 594 − 306
+    expect(sp.toGenerate).toBe(0); // pula pokrywa dług
+    expect(sp.neededSpendGr).toBe(0);
+    expect(sp.budgetIncreaseGr).toBe(0);
+    expect(plan.totalToGenerate).toBe(0);
+  });
+
+  it("pula pokrywa CZĘŚCIOWO → generujemy tylko nadwyżkę ponad pulę", () => {
+    const statuses = [
+      { clientId: "a", vertical: "SP", contractedThisMonth: 700, deliveredThisMonth: 306, carriedIn: 0, owed: 700, balance: 394 },
+    ];
+    const plan = buildFulfillmentPlan(statuses, { SP: 260 }, {}, { SP: 594 });
+    const sp = plan.verticals.find((v) => v.vertical === "SP")!;
+    expect(sp.remaining).toBe(394);
+    expect(sp.pool).toBe(288); // 594 − 306
+    expect(sp.toGenerate).toBe(106); // 394 − 288
+    expect(sp.neededSpendGr).toBe(106 * 260);
+    expect(sp.budgetIncreaseGr).toBe(106 * 260);
+  });
+
+  it("bez generatedByVertical (pominięty) pula=0 → zachowanie jak dawniej", () => {
+    const statuses = [
+      { clientId: "a", vertical: "SKD", contractedThisMonth: 100, deliveredThisMonth: 40, carriedIn: 0, owed: 100, balance: 60 },
+    ];
+    const plan = buildFulfillmentPlan(statuses, { SKD: 1000 }, {});
+    const skd = plan.verticals.find((v) => v.vertical === "SKD")!;
+    expect(skd.pool).toBe(0);
+    expect(skd.toGenerate).toBe(60);
+    expect(skd.neededSpendGr).toBe(60_000);
+  });
 });

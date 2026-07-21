@@ -104,7 +104,9 @@ export default async function LeadNichePage({
   const owed = rows.reduce((n, r) => n + Math.max(0, r.owed), 0);
   const covered = rows.reduce((n, r) => n + Math.min(r.delivered, Math.max(0, r.owed)), 0);
   const plan = fulfillment.plan.verticals.find((v) => v.vertical === vertical);
-  const remaining = plan?.remaining ?? 0;
+  const remaining = plan?.remaining ?? 0; // dług wobec klientów (do dowiezienia)
+  const toGenerate = plan?.toGenerate ?? 0; // do WYGENEROWANIA (po odjęciu puli)
+  const addSpendGr = plan?.budgetIncreaseGr ?? 0;
 
   const brands: BrandOption[] = brandRows;
   const clients: ClientOption[] = clientRows.map((c) => ({
@@ -159,15 +161,17 @@ export default async function LeadNichePage({
             sub={unassigned < 0 ? "przypisano więcej niż wygenerowano (zapas)" : undefined}
           />
           <KpiCard
-            label="Brakuje do kontraktów"
-            value={remaining}
-            tone={remaining > 0 ? "negative" : "positive"}
+            label="Do wygenerowania"
+            value={toGenerate}
+            tone={toGenerate > 0 ? "negative" : "positive"}
             sub={
-              remaining > 0 && plan && plan.budgetIncreaseGr > 0
-                ? `dołóż ≈${formatMoney(plan.budgetIncreaseGr)} w Mecie`
-                : remaining === 0
-                  ? "wszystko dowiezione"
-                  : undefined
+              toGenerate > 0
+                ? `dołóż ≈${formatMoney(addSpendGr)} w Mecie`
+                : remaining > 0
+                  ? "pokryte z puli — dołóż 0 zł"
+                  : owed > 0
+                    ? "wszystko dowiezione"
+                    : undefined
             }
           />
         </div>

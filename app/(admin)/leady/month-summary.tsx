@@ -92,7 +92,9 @@ export function MonthSummary({
           plan.totalRemaining > 0 ? (
             <>
               brakuje <span className="font-medium text-amber-600 dark:text-amber-400">{plan.totalRemaining}</span>{" "}
-              · dołóż ≈{formatMoney(plan.totalBudgetIncreaseGr)}
+              {plan.totalBudgetIncreaseGr > 0
+                ? `· dołóż ≈${formatMoney(plan.totalBudgetIncreaseGr)}`
+                : "· pula pokrywa"}
             </>
           ) : owed > 0 ? (
             <span className="font-medium text-emerald-600 dark:text-emerald-400">

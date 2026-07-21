@@ -122,55 +122,79 @@ export function buildDeliveryStatus(
 
 export interface VerticalPlan {
   vertical: string;
-  remaining: number; // brakujące leady do dowiezienia (suma dodatnich bilansów)
+  remaining: number; // brakujące leady DO DOWIEZIENIA klientom (suma dodatnich bilansów)
+  pool: number; // nieprzypisane leady już WYGENEROWANE (generated − assigned, ≥0)
+  toGenerate: number; // leady jeszcze DO WYGENEROWANIA = max(0, remaining − pool)
   cplGr: number | null; // CPL z ostatniego okresu (per wertykal)
-  neededSpendGr: number; // remaining × CPL — ile DOŁOŻYĆ, by dowieźć brakujące
+  neededSpendGr: number; // toGenerate × CPL — ile DOŁOŻYĆ w Mecie (0 gdy pula pokrywa)
   spentGr: number; // już wydane w tym miesiącu (Meta) na ten wertykal (kontekst)
-  budgetIncreaseGr: number; // = neededSpendGr (brakujące leady są PONAD dostarczone)
+  budgetIncreaseGr: number; // = neededSpendGr
 }
 
 export interface FulfillmentPlan {
   verticals: VerticalPlan[];
   totalRemaining: number;
+  totalToGenerate: number;
   totalNeededSpendGr: number;
   totalSpentGr: number;
   totalBudgetIncreaseGr: number;
 }
 
 /**
- * Plan dowiezienia: dla każdego wertykalu bierze brakujące leady (suma dodatnich
- * bilansów klientów) i mnoży przez CPL z ostatniego okresu → ile trzeba wydać.
- * Wzrost budżetu = ile jeszcze ponad już wydane w tym miesiącu.
+ * Plan dowiezienia. Dla każdego wertykalu:
+ *  • remaining = brakujące leady do dowiezienia klientom (suma dodatnich bilansów),
+ *  • pool = leady już WYGENEROWANE, a jeszcze nieprzypisane (generated − assigned, ≥0),
+ *  • toGenerate = ile jeszcze trzeba WYGENEROWAĆ = max(0, remaining − pool).
+ * Kluczowe: budżet „do dołożenia" liczymy od `toGenerate`, NIE od `remaining` —
+ * jeśli w puli leżą już wygenerowane leady, pokrywają dług bez nowego spendu
+ * (wystarczy je przypisać/przedzwonić). `generatedByVertical` opcjonalny: gdy
+ * pominięty, pula = 0 i plan zachowuje się jak dawniej (remaining × CPL).
  */
 export function buildFulfillmentPlan(
   statuses: readonly ClientVerticalStatus[],
   cplByVertical: Readonly<Record<string, number | null>>,
-  spentByVertical: Readonly<Record<string, number>>
+  spentByVertical: Readonly<Record<string, number>>,
+  generatedByVertical: Readonly<Record<string, number>> = {}
 ): FulfillmentPlan {
   const remainingByVertical = new Map<string, number>();
+  const assignedByVertical = new Map<string, number>();
   for (const s of statuses) {
     if (s.balance > 0) {
       remainingByVertical.set(s.vertical, (remainingByVertical.get(s.vertical) ?? 0) + s.balance);
     }
+    if (s.deliveredThisMonth > 0) {
+      assignedByVertical.set(
+        s.vertical,
+        (assignedByVertical.get(s.vertical) ?? 0) + s.deliveredThisMonth
+      );
+    }
   }
-  // uwzględnij też wertykały, na które coś wydano, choć nic nie zalegają (spent>0)
+  // uwzględnij też wertykały, na które coś wydano/wygenerowano, choć nic nie
+  // zalegają (spent>0 / generated>0) — kontekst puli i spendu
   for (const v of Object.keys(spentByVertical)) {
+    if (!remainingByVertical.has(v)) remainingByVertical.set(v, 0);
+  }
+  for (const v of Object.keys(generatedByVertical)) {
     if (!remainingByVertical.has(v)) remainingByVertical.set(v, 0);
   }
 
   const verticals: VerticalPlan[] = [...remainingByVertical.entries()]
     .map(([vertical, remaining]) => {
       const cplGr = cplByVertical[vertical] ?? null;
-      const neededSpendGr = cplGr !== null ? Math.round(remaining * cplGr) : 0;
+      // pula = wygenerowane, a jeszcze nieprzypisane (≥0)
+      const pool = Math.max(0, (generatedByVertical[vertical] ?? 0) - (assignedByVertical.get(vertical) ?? 0));
+      // do wygenerowania = brakujące leady PONAD to, co już leży w puli
+      const toGenerate = Math.max(0, remaining - pool);
+      const neededSpendGr = cplGr !== null ? Math.round(toGenerate * cplGr) : 0;
       const spentGr = spentByVertical[vertical] ?? 0;
       return {
         vertical,
         remaining,
+        pool,
+        toGenerate,
         cplGr,
         neededSpendGr,
         spentGr,
-        // brakujące leady są PONAD już dostarczone → dokładamy pełny koszt ich
-        // wygenerowania (nie odejmujemy dotychczasowego spendu)
         budgetIncreaseGr: neededSpendGr,
       };
     })
@@ -179,6 +203,7 @@ export function buildFulfillmentPlan(
   return {
     verticals,
     totalRemaining: verticals.reduce((s, v) => s + v.remaining, 0),
+    totalToGenerate: verticals.reduce((s, v) => s + v.toGenerate, 0),
     totalNeededSpendGr: verticals.reduce((s, v) => s + v.neededSpendGr, 0),
     totalSpentGr: verticals.reduce((s, v) => s + v.spentGr, 0),
     totalBudgetIncreaseGr: verticals.reduce((s, v) => s + v.budgetIncreaseGr, 0),
