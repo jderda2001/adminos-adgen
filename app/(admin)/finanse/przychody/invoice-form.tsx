@@ -59,11 +59,14 @@ export function InvoiceFormDialog({
   invoice,
   clients,
   leadVerticals,
+  defaultClientId,
   trigger,
 }: {
   invoice?: InvoiceRow;
   clients: ClientOption[];
   leadVerticals: string[];
+  /** wstępnie wybrany klient przy nowej pozycji (np. „dodaj kolejną pozycję") */
+  defaultClientId?: string;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -234,7 +237,7 @@ export function InvoiceFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="clientId">Klient *</Label>
-              <Select name="clientId" defaultValue={invoice?.clientId}>
+              <Select name="clientId" defaultValue={invoice?.clientId ?? defaultClientId}>
                 <SelectTrigger id="clientId" className="w-full">
                   <SelectValue placeholder="Wybierz klienta" />
                 </SelectTrigger>

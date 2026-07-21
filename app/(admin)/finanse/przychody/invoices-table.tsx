@@ -1,10 +1,18 @@
 "use client";
 
+// Rejestr przychodów pogrupowany PO KLIENCIE: jeden wiersz = klient + pomarańczowe
+// kółko z liczbą pozycji. Klik → sidebar z listą pozycji (kafelki) + „dodaj kolejną
+// pozycję" + suma. Klik w pozycję → jej pełne szczegóły (z akcjami). Dzięki temu
+// klient z kilkoma usługami (np. leady + obdzwanianie w call center) jest jednym
+// wpisem, a pozycje rozróżnialne w środku.
+
 import { useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
+  ArrowLeft,
   BadgeCheck,
+  ChevronRight,
   Download,
   Pencil,
   Plus,
@@ -62,6 +70,7 @@ import {
   pluralPl,
   todayUTC,
 } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { ActionResult } from "@/lib/action-result";
 import { InvoiceFormDialog } from "./invoice-form";
 import {
@@ -107,8 +116,16 @@ export interface RevenueKpis {
   count: number;
 }
 
-// Etykiety statusów w słowniku arkusza adGen (rejestr przychodów):
-// DRAFT=„Bez FV", ISSUED=„Wysłana", PAID=„Opłacona", OVERDUE=„Przeterminowana".
+interface ClientGroup {
+  clientId: string;
+  clientName: string;
+  positions: InvoiceRow[];
+  netGr: number;
+  grossGr: number;
+  status: string; // najpilniejszy status w grupie (do plakietki wiersza)
+  offerTags: string[]; // suma tagów wszystkich pozycji (bez duplikatów)
+}
+
 const REVENUE_STATUS_LABELS: Record<string, string> = {
   DRAFT: "Bez FV",
   ISSUED: "Wysłana",
@@ -124,7 +141,15 @@ function statusLabel(status: string): string {
   );
 }
 
-/** Dni od wystawienia do zapłaty (ile czekaliśmy na płatność) */
+// Najpilniejszy status grupy: przeterminowane > wysłane > bez FV > opłacone.
+function groupStatus(positions: InvoiceRow[]): string {
+  const has = (s: string) => positions.some((p) => p.status === s);
+  if (has("OVERDUE")) return "OVERDUE";
+  if (has("ISSUED")) return "ISSUED";
+  if (has("DRAFT")) return "DRAFT";
+  return "PAID";
+}
+
 function waitedDays(row: InvoiceRow): number | null {
   if (row.status !== "PAID" || !row.paidDate) return null;
   const from = new Date(row.issueDate).getTime();
@@ -176,7 +201,11 @@ export function InvoicesTable({
   const [, startNavTransition] = useTransition();
   const [pending, startTransition] = useTransition();
 
-  const [detail, setDetail] = useState<InvoiceRow | null>(null);
+  // sidebar: poziom 1 = lista pozycji klienta, poziom 2 = szczegóły pozycji.
+  // Trzymamy ID (nie snapshot) i wyliczamy z żywych danych — po edycji/dodaniu
+  // sidebar odświeża się sam.
+  const [openClientId, setOpenClientId] = useState<string | null>(null);
+  const [openPositionId, setOpenPositionId] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<InvoiceRow | null>(null);
   const [toMarkPaid, setToMarkPaid] = useState<InvoiceRow | null>(null);
   const [paidDate, setPaidDate] = useState("");
@@ -194,6 +223,43 @@ export function InvoicesTable({
       router.replace(`${pathname}?${next.toString()}`, { scroll: false });
     });
   }
+
+  // grupowanie po kliencie (zachowuje kolejność wejścia = malejąco po dacie z serwera)
+  const groups = useMemo(() => {
+    const map = new Map<string, ClientGroup>();
+    for (const inv of invoices) {
+      let g = map.get(inv.clientId);
+      if (!g) {
+        g = {
+          clientId: inv.clientId,
+          clientName: inv.clientName,
+          positions: [],
+          netGr: 0,
+          grossGr: 0,
+          status: "PAID",
+          offerTags: [],
+        };
+        map.set(inv.clientId, g);
+      }
+      g.positions.push(inv);
+      g.netGr += inv.netGr;
+      g.grossGr += inv.grossGr;
+    }
+    const result = [...map.values()];
+    for (const g of result) {
+      g.status = groupStatus(g.positions);
+      const seen = new Set<string>();
+      for (const p of g.positions)
+        for (const t of parseTags(p.offerTags))
+          if (!seen.has(t)) seen.add(t);
+      g.offerTags = [...seen];
+    }
+    return result;
+  }, [invoices]);
+
+  const openClient = groups.find((g) => g.clientId === openClientId) ?? null;
+  const openPosition =
+    openClient?.positions.find((p) => p.id === openPositionId) ?? null;
 
   const totals = useMemo(
     () =>
@@ -223,7 +289,7 @@ export function InvoicesTable({
       if (result.ok) toast.success(result.message);
       else toast.error(result.error);
       setToDelete(null);
-      setDetail(null);
+      setOpenPositionId(null); // wróć do listy pozycji (sidebar zamknie się, jeśli to była ostatnia)
     });
   }
 
@@ -235,7 +301,7 @@ export function InvoicesTable({
       if (result.ok) {
         toast.success(result.message);
         setToMarkPaid(null);
-        setDetail(null);
+        setOpenPositionId(null);
       } else {
         toast.error(result.error);
       }
@@ -247,10 +313,10 @@ export function InvoicesTable({
     setToMarkPaid(invoice);
   }
 
-  const columns: ColumnDef<InvoiceRow>[] = useMemo(
+  const columns: ColumnDef<ClientGroup>[] = useMemo(
     () => [
       {
-        accessorKey: "status",
+        id: "status",
         header: "Status",
         cell: ({ row }) => (
           <StatusBadge tone={invoiceTone(row.original.status)}>
@@ -264,13 +330,14 @@ export function InvoicesTable({
           <SortableHeader column={column}>Klient</SortableHeader>
         ),
         cell: ({ row }) => (
-          <div className="min-w-0">
-            <div className="font-medium">{row.original.clientName}</div>
-            {row.original.label && (
-              <div className="truncate text-xs text-muted-foreground">
-                {row.original.label}
-              </div>
-            )}
+          <div className="flex items-center gap-2">
+            <span className="font-medium">{row.original.clientName}</span>
+            <span
+              className="grid size-5 shrink-0 place-items-center rounded-full bg-orange-100 text-[11px] font-semibold text-orange-700 dark:bg-orange-950 dark:text-orange-300"
+              title={`${row.original.positions.length} ${pluralPl(row.original.positions.length, "pozycja", "pozycje", "pozycji")}`}
+            >
+              {row.original.positions.length}
+            </span>
           </div>
         ),
       },
@@ -295,26 +362,30 @@ export function InvoicesTable({
         cell: ({ row }) => formatMoney(row.original.grossGr),
       },
       {
-        accessorKey: "dueDate",
-        header: ({ column }) => (
-          <SortableHeader column={column}>Termin</SortableHeader>
-        ),
-        cell: ({ row }) => formatDate(new Date(row.original.dueDate)),
-      },
-      {
-        accessorKey: "offerTags",
+        id: "offerTags",
         header: "Oferta",
         enableSorting: false,
-        cell: ({ row }) => <OfferTags raw={row.original.offerTags} />,
+        cell: ({ row }) =>
+          row.original.offerTags.length === 0 ? (
+            <span className="text-muted-foreground">—</span>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {row.original.offerTags.map((t) => (
+                <StatusBadge key={t} tone="indigo">
+                  {t}
+                </StatusBadge>
+              ))}
+            </div>
+          ),
       },
       {
-        id: "waited",
-        header: "Ile czekaliśmy",
+        id: "chevron",
+        header: "",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="tabular-nums text-muted-foreground">
-            {waitedLabel(row.original)}
-          </span>
+        cell: () => (
+          <div className="flex justify-end text-muted-foreground/50">
+            <ChevronRight className="size-4" />
+          </div>
         ),
       },
     ],
@@ -402,13 +473,19 @@ export function InvoicesTable({
 
       <DataTable
         columns={columns}
-        data={invoices}
-        initialSorting={[{ id: "dueDate", desc: true }]}
-        onRowClick={(row) => setDetail(row)}
+        data={groups}
+        initialSorting={[{ id: "grossGr", desc: true }]}
+        onRowClick={(g) => {
+          setOpenClientId(g.clientId);
+          setOpenPositionId(null);
+        }}
+        rowClassName={() => "cursor-pointer"}
         footer={
           <>
             <TableCell colSpan={2} className="font-medium">
-              Suma ({invoices.length}{" "}
+              Razem ({groups.length}{" "}
+              {pluralPl(groups.length, "klient", "klienci", "klientów")} ·{" "}
+              {invoices.length}{" "}
               {pluralPl(invoices.length, "pozycja", "pozycje", "pozycji")})
             </TableCell>
             <TableCell className="text-right font-medium tabular-nums">
@@ -417,7 +494,7 @@ export function InvoicesTable({
             <TableCell className="text-right font-medium tabular-nums">
               {formatMoney(totals.grossGr)}
             </TableCell>
-            <TableCell colSpan={3} />
+            <TableCell colSpan={2} />
           </>
         }
         emptyState={
@@ -438,17 +515,30 @@ export function InvoicesTable({
         }
       />
 
-      {/* ── DetailSheet: szczegóły pozycji ─────────────────────── */}
+      {/* ── Sidebar: pozycje klienta → szczegóły pozycji ───────── */}
       <DetailSheet
-        open={detail !== null}
-        onOpenChange={(open) => !open && setDetail(null)}
-        title={detail?.clientName ?? "Szczegóły przychodu"}
-        description={detail?.number ? `Nr faktury: ${detail.number}` : "Bez FV"}
+        open={openClient !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOpenClientId(null);
+            setOpenPositionId(null);
+          }
+        }}
+        title={openClient?.clientName ?? "Klient"}
+        description={
+          openPosition
+            ? openPosition.number
+              ? `Nr faktury: ${openPosition.number}`
+              : "Bez FV"
+            : openClient
+              ? `${openClient.positions.length} ${pluralPl(openClient.positions.length, "pozycja", "pozycje", "pozycji")}`
+              : undefined
+        }
         footer={
-          detail && (
+          openPosition && (
             <div className="flex flex-wrap items-center gap-2">
               <InvoiceFormDialog
-                invoice={detail}
+                invoice={openPosition}
                 clients={clients}
                 leadVerticals={leadVerticals}
                 trigger={
@@ -457,35 +547,27 @@ export function InvoicesTable({
                   </Button>
                 }
               />
-              {detail.status === "DRAFT" && (
+              {openPosition.status === "DRAFT" && (
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={pending}
-                  onClick={() =>
-                    runAction(() => markInvoiceIssuedAction(detail.id))
-                  }
+                  onClick={() => runAction(() => markInvoiceIssuedAction(openPosition.id))}
                 >
                   <Send className="size-4" /> Oznacz wysłaną
                 </Button>
               )}
-              {detail.status !== "PAID" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => openMarkPaid(detail)}
-                >
+              {openPosition.status !== "PAID" && (
+                <Button variant="outline" size="sm" onClick={() => openMarkPaid(openPosition)}>
                   <BadgeCheck className="size-4" /> Oznacz opłaconą
                 </Button>
               )}
-              {detail.status === "PAID" && (
+              {openPosition.status === "PAID" && (
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={pending}
-                  onClick={() =>
-                    runAction(() => undoInvoicePaymentAction(detail.id))
-                  }
+                  onClick={() => runAction(() => undoInvoicePaymentAction(openPosition.id))}
                 >
                   <RotateCcw className="size-4" /> Cofnij zapłatę
                 </Button>
@@ -494,7 +576,7 @@ export function InvoicesTable({
                 variant="ghost"
                 size="sm"
                 className="ml-auto text-destructive hover:text-destructive"
-                onClick={() => setToDelete(detail)}
+                onClick={() => setToDelete(openPosition)}
               >
                 <Trash2 className="size-4" /> Usuń
               </Button>
@@ -502,43 +584,111 @@ export function InvoicesTable({
           )
         }
       >
-        {detail && (
+        {/* Poziom 1: lista pozycji klienta */}
+        {openClient && !openPosition && (
+          <div className="space-y-2">
+            {openClient.positions.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setOpenPositionId(p.id)}
+                className="flex w-full items-center gap-3 rounded-xl border bg-card px-3.5 py-3 text-left transition-colors hover:border-primary/40 hover:bg-muted/40"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">
+                    {p.label || p.clientName}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <StatusBadge tone={invoiceTone(p.status)}>
+                      {statusLabel(p.status)}
+                    </StatusBadge>
+                    {parseTags(p.offerTags).map((t) => (
+                      <StatusBadge key={t} tone="indigo">
+                        {t}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right tabular-nums">
+                  <div className="text-sm font-semibold">{formatMoney(p.grossGr)}</div>
+                  <div className="text-xs text-muted-foreground">{formatMoney(p.netGr)} netto</div>
+                </div>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+              </button>
+            ))}
+
+            {/* dodaj kolejną pozycję dla tego klienta */}
+            <InvoiceFormDialog
+              clients={clients}
+              leadVerticals={leadVerticals}
+              defaultClientId={openClient.clientId}
+              trigger={
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed bg-muted/30 px-3.5 py-3 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground"
+                >
+                  <Plus className="size-4" /> Dodaj kolejną pozycję
+                </button>
+              }
+            />
+
+            {/* suma wszystkich pozycji klienta */}
+            <div className="mt-1 flex items-baseline justify-between border-t pt-3">
+              <span className="text-sm text-muted-foreground">
+                Razem ({openClient.positions.length}{" "}
+                {pluralPl(openClient.positions.length, "pozycja", "pozycje", "pozycji")})
+              </span>
+              <span className="text-right tabular-nums">
+                <span className="text-base font-semibold">{formatMoney(openClient.grossGr)}</span>
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {formatMoney(openClient.netGr)} netto
+                </span>
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Poziom 2: szczegóły pozycji */}
+        {openPosition && (
           <div>
+            <button
+              type="button"
+              onClick={() => setOpenPositionId(null)}
+              className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="size-4" /> Pozycje klienta
+              {openClient && ` (${openClient.positions.length})`}
+            </button>
             <DetailRow label="Status">
-              <StatusBadge tone={invoiceTone(detail.status)}>
-                {statusLabel(detail.status)}
+              <StatusBadge tone={invoiceTone(openPosition.status)}>
+                {statusLabel(openPosition.status)}
               </StatusBadge>
             </DetailRow>
-            <DetailRow label="Klient">{detail.clientName}</DetailRow>
-            <DetailRow label="Opis pozycji">
-              {detail.label || "—"}
-            </DetailRow>
-            <DetailRow label="Netto">{formatMoney(detail.netGr)}</DetailRow>
+            <DetailRow label="Opis pozycji">{openPosition.label || "—"}</DetailRow>
+            <DetailRow label="Netto">{formatMoney(openPosition.netGr)}</DetailRow>
             <DetailRow label="VAT">
-              {formatMoney(detail.vatGr)}
-              {isVatRate(detail.vatRate)
-                ? ` (${VAT_RATE_LABELS[detail.vatRate]})`
+              {formatMoney(openPosition.vatGr)}
+              {isVatRate(openPosition.vatRate)
+                ? ` (${VAT_RATE_LABELS[openPosition.vatRate]})`
                 : ""}
             </DetailRow>
-            <DetailRow label="Brutto">{formatMoney(detail.grossGr)}</DetailRow>
+            <DetailRow label="Brutto">{formatMoney(openPosition.grossGr)}</DetailRow>
             <DetailRow label="Data przychodu">
-              {formatDate(new Date(detail.saleDate))}
+              {formatDate(new Date(openPosition.saleDate))}
             </DetailRow>
             <DetailRow label="Termin płatności">
-              {formatDate(new Date(detail.dueDate))}
+              {formatDate(new Date(openPosition.dueDate))}
             </DetailRow>
             <DetailRow label="Data zapłaty">
-              {detail.paidDate ? formatDate(new Date(detail.paidDate)) : "—"}
+              {openPosition.paidDate ? formatDate(new Date(openPosition.paidDate)) : "—"}
             </DetailRow>
-            <DetailRow label="Ile czekaliśmy">
-              {waitedLabel(detail)}
-            </DetailRow>
+            <DetailRow label="Ile czekaliśmy">{waitedLabel(openPosition)}</DetailRow>
             <DetailRow label="Oferta">
-              <OfferTags raw={detail.offerTags} />
+              <OfferTags raw={openPosition.offerTags} />
             </DetailRow>
             <DetailRow label="Uwagi">
-              <span className="whitespace-pre-wrap font-normal text-left">
-                {detail.notes || "—"}
+              <span className="whitespace-pre-wrap text-left font-normal">
+                {openPosition.notes || "—"}
               </span>
             </DetailRow>
           </div>
@@ -562,11 +712,7 @@ export function InvoicesTable({
             </p>
             <div className="space-y-2">
               <Label htmlFor="paidDate">Data zapłaty *</Label>
-              <DatePicker
-                id="paidDate"
-                value={paidDate}
-                onChange={setPaidDate}
-              />
+              <DatePicker id="paidDate" value={paidDate} onChange={setPaidDate} />
               <p className="text-xs text-muted-foreground">
                 Dzień, w którym przelew został zaksięgowany na naszym koncie.
               </p>
@@ -597,6 +743,7 @@ export function InvoicesTable({
             <AlertDialogTitle>Usunąć pozycję?</AlertDialogTitle>
             <AlertDialogDescription>
               Przychód {toDelete?.clientName}
+              {toDelete?.label ? ` — ${toDelete.label}` : ""}
               {toDelete?.number ? ` (${toDelete.number})` : ""} zostanie trwale
               usunięty. Tej operacji nie można cofnąć.
             </AlertDialogDescription>
