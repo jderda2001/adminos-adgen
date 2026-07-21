@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { requireAdmin, isAuthDisabled } from "@/lib/auth";
 import {
   generateRecurringCosts,
-  getAdBudgetStatus,
+  getLeadFulfillment,
   getVatForMonth,
 } from "@/lib/reports";
 import { getAdBudgetCategoryIds } from "@/lib/settings";
@@ -55,10 +55,27 @@ export default async function CostsPage({
   const selectedMonth = monthKey(period.from);
   const AUTO_AD_BUDGET_FROM = "2026-08";
   const showAutoAdBudget = selectedMonth >= AUTO_AD_BUDGET_FROM;
-  const [adBudget, adBudgetCatIds] = await Promise.all([
-    getAdBudgetStatus(selectedMonth),
+  const [adBudgetCatIds, fulfillment] = await Promise.all([
     getAdBudgetCategoryIds(),
+    showAutoAdBudget ? getLeadFulfillment(selectedMonth) : null,
   ]);
+
+  // rozbicie budżetu na klientów (szczegóły auto-wiersza): budżet = leady × CPL.
+  // Szacunek miesiąca = suma tych budżetów (spina się z rozbiciem co do grosza).
+  const adBudgetBreakdown = (fulfillment?.statuses ?? [])
+    .filter((s) => s.owed > 0)
+    .map((s) => {
+      const cplGr = fulfillment!.cplByVertical[s.vertical] ?? null;
+      return {
+        clientName: s.clientName,
+        vertical: s.vertical,
+        leads: s.owed,
+        cplGr,
+        budgetGr: cplGr !== null ? Math.round(s.owed * cplGr) : 0,
+      };
+    })
+    .sort((a, b) => b.budgetGr - a.budgetGr);
+  const adBudgetEstimateGr = adBudgetBreakdown.reduce((s, b) => s + b.budgetGr, 0);
   // VAT idzie za WYBRANYM okresem: miesiąc PRZED początkiem okresu (przeglądając
   // sierpień widzisz VAT za lipiec — kwotę odłożoną, płatną do US w tym miesiącu)
   const vatMonth = monthKey(
@@ -149,9 +166,9 @@ export default async function CostsPage({
   // spięty z górnym badge'em: kwota = szacunek − zasilenia (do zapłaty), fioletowy,
   // tylko-do-odczytu; liczy się do sum i „Do zapłaty". Zasilenia (wpisy kategorii)
   // są schowane z listy i netowane tutaj.
-  const adBudgetRemainingGr = Math.max(0, adBudget.planGr - adBudgetFundedGr);
+  const adBudgetRemainingGr = Math.max(0, adBudgetEstimateGr - adBudgetFundedGr);
   const adBudgetCat = categories.find((c) => adBudgetCatIds.has(c.id));
-  if (showAutoAdBudget && adBudget.planGr > 0) {
+  if (showAutoAdBudget && adBudgetEstimateGr > 0) {
     const monthEndIso = new Date(
       Date.UTC(period.from.getUTCFullYear(), period.from.getUTCMonth() + 1, 0)
     ).toISOString();
@@ -216,7 +233,7 @@ export default async function CostsPage({
         {showAutoAdBudget && (
           <AdBudgetAutoRow
             monthLabel={formatMonth(selectedMonth)}
-            estimateGr={adBudget.planGr}
+            estimateGr={adBudgetEstimateGr}
             fundedGr={adBudgetFundedGr}
           />
         )}
@@ -230,6 +247,16 @@ export default async function CostsPage({
           prevVat={prevVat}
           currentUserId={me.id}
           authDisabled={isAuthDisabled()}
+          adBudget={
+            showAutoAdBudget && adBudgetEstimateGr > 0
+              ? {
+                  monthLabel: formatMonth(selectedMonth),
+                  estimateGr: adBudgetEstimateGr,
+                  fundedGr: adBudgetFundedGr,
+                  breakdown: adBudgetBreakdown,
+                }
+              : null
+          }
         />
       </div>
     </>

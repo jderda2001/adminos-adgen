@@ -462,6 +462,7 @@ export function CostsTable({
   prevVat,
   currentUserId,
   authDisabled,
+  adBudget,
 }: {
   costs: CostRow[];
   categories: SelectOption[];
@@ -471,12 +472,25 @@ export function CostsTable({
   prevVat: { monthLabel: string; dueGr: number };
   currentUserId: string;
   authDisabled: boolean;
+  adBudget: {
+    monthLabel: string;
+    estimateGr: number;
+    fundedGr: number;
+    breakdown: {
+      clientName: string;
+      vertical: string;
+      leads: number;
+      cplGr: number | null;
+      budgetGr: number;
+    }[];
+  } | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<CostRow | null>(null);
+  const [adBudgetOpen, setAdBudgetOpen] = useState(false);
   const [toDelete, setToDelete] = useState<CostRow | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -706,7 +720,20 @@ export function CostsTable({
         id: "details",
         header: "",
         cell: ({ row }) =>
-          row.original.autoAdBudget ? null : (
+          row.original.autoAdBudget ? (
+            <div className="flex justify-end">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title="Rozbicie na klientów"
+                aria-label="Rozbicie budżetu na klientów"
+                className="text-purple-700 hover:text-purple-900 dark:text-purple-300"
+                onClick={() => setAdBudgetOpen(true)}
+              >
+                <Info className="size-4" />
+              </Button>
+            </div>
+          ) : (
           <div className="flex justify-end">
             <Button
               variant="ghost"
@@ -1113,6 +1140,62 @@ export function CostsTable({
           </div>
         )}
       </DetailSheet>
+
+      {/* ── Rozbicie budżetu reklamowego na klientów ────────────── */}
+      {adBudget && (
+        <DetailSheet
+          open={adBudgetOpen}
+          onOpenChange={setAdBudgetOpen}
+          title="Budżet reklamowy — auto"
+          description={`${adBudget.monthLabel} · szacunek ${formatMoney(adBudget.estimateGr)} · zasilono ${formatMoney(adBudget.fundedGr)}`}
+        >
+          {adBudget.breakdown.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Brak zamówień leadów w tym miesiącu — budżet policzy się po dodaniu
+              paczek leadów w Przychodach.
+            </p>
+          ) : (
+            <div>
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-b pb-1.5 text-xs font-medium text-muted-foreground">
+                <span>Klient · wertykał</span>
+                <span className="text-right">Leady</span>
+                <span className="text-right">Budżet</span>
+              </div>
+              {adBudget.breakdown.map((b, i) => (
+                <div
+                  key={`${b.clientName}|${b.vertical}|${i}`}
+                  className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 border-b border-border/50 py-2 text-sm"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{b.clientName}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {b.vertical}
+                      {b.cplGr !== null && ` · CPL ${formatMoney(b.cplGr)}`}
+                    </span>
+                  </span>
+                  <span className="text-right tabular-nums">{b.leads}</span>
+                  <span className="text-right font-medium tabular-nums">
+                    {formatMoney(b.budgetGr)}
+                  </span>
+                </div>
+              ))}
+              <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 pt-2 text-sm font-semibold">
+                <span>Razem</span>
+                <span className="text-right tabular-nums">
+                  {adBudget.breakdown.reduce((s, b) => s + b.leads, 0)}
+                </span>
+                <span className="text-right tabular-nums">
+                  {formatMoney(adBudget.breakdown.reduce((s, b) => s + b.budgetGr, 0))}
+                </span>
+              </div>
+              <p className="mt-3 text-[11px] leading-snug text-muted-foreground">
+                Budżet na klienta = leady do dostarczenia × CPL wertykału (z Mety).
+                Górny wiersz „do zapłaty" to szacunek pomniejszony o zasilenia.
+              </p>
+            </div>
+          )}
+        </DetailSheet>
+      )}
 
       <AlertDialog
         open={toDelete !== null}
