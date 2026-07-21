@@ -60,6 +60,31 @@ const COST_WHERE = {
 } as const;
 
 /**
+ * Filtr kosztów dla widoku okresu na Dashboardzie: koszty POTWIERDZONE ORAZ
+ * PLANOWANE przyszłe kopie cykliczne (needsConfirmation z docDate od początku
+ * następnego miesiąca) — to realny przyszły wypływ, spójnie z rejestrem Kosztów,
+ * który dla przyszłych miesięcy pokazuje te kopie jako „Planowana". Dzięki temu
+ * koszty są symetryczne z przychodami (te liczą też zakontraktowane, jeszcze
+ * niezapłacone faktury). Kolejka „Do potwierdzenia" (needsConfirmation z docDate
+ * SPRZED następnego miesiąca) zostaje poza wynikiem — czeka na ręczne zatwierdzenie.
+ * Kategorie odłożone (isDeferred) zawsze poza zyskiem.
+ */
+function costWhereWithPlanned(period: Period) {
+  const today = todayUTC();
+  const nextMonthStart = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1)
+  );
+  return {
+    category: { isDeferred: false },
+    docDate: { gte: period.from, lt: period.to },
+    OR: [
+      { needsConfirmation: false },
+      { needsConfirmation: true, docDate: { gte: nextMonthStart } },
+    ],
+  };
+}
+
+/**
  * Aktualizuje statusy faktur względem terminu płatności:
  * ISSUED po terminie → OVERDUE, OVERDUE z terminem w przyszłości (po edycji) → ISSUED.
  * Wołane przy wejściu na strony korzystające ze statusów.
@@ -95,7 +120,10 @@ export async function getDashboardData(period: Period): Promise<DashboardData> {
       _sum: { netGr: true, vatGr: true },
     }),
     db.cost.aggregate({
-      where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
+      // koszty potwierdzone + planowane przyszłe kopie cykliczne (patrz
+      // costWhereWithPlanned) — inaczej dla przyszłych miesięcy Dashboard
+      // liczyłby przychody z kontraktów, ale pomijał 100k planowanych kosztów.
+      where: costWhereWithPlanned(period),
       _sum: { netGr: true, vatGr: true },
     }),
     // należności przeterminowane — stan na dziś, niezależnie od filtra okresu
@@ -229,7 +257,8 @@ export async function getCostStructure(
     await Promise.all([
       db.cost.groupBy({
         by: ["categoryId"],
-        where: { ...COST_WHERE, docDate: { gte: period.from, lt: period.to } },
+        // spójnie z KPI Dashboardu: potwierdzone + planowane przyszłe kopie
+        where: costWhereWithPlanned(period),
         _sum: { netGr: true },
       }),
       db.costCategory.findMany(),
