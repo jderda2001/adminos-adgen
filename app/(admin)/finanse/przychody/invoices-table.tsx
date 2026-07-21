@@ -6,7 +6,7 @@
 // klient z kilkoma usługami (np. leady + obdzwanianie w call center) jest jednym
 // wpisem, a pozycje rozróżnialne w środku.
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
@@ -14,6 +14,7 @@ import {
   BadgeCheck,
   ChevronRight,
   Download,
+  Paperclip,
   Pencil,
   Plus,
   RotateCcw,
@@ -78,6 +79,8 @@ import {
   markInvoiceIssuedAction,
   markInvoicePaidAction,
   undoInvoicePaymentAction,
+  uploadInvoiceAttachmentAction,
+  removeInvoiceAttachmentAction,
 } from "./actions";
 import { ReminderTimeline } from "./reminder-timeline";
 import type { ExistingReminder } from "@/lib/payment-reminders";
@@ -108,6 +111,7 @@ export interface InvoiceRow {
   reminders: ExistingReminder[];
   clientHasEmail: boolean;
   clientHasPhone: boolean;
+  attachmentName: string | null; // wgrany plik faktury (do maila)
 }
 
 export interface ClientOption {
@@ -198,6 +202,86 @@ function OfferTags({ raw }: { raw: string | null }) {
           {t}
         </StatusBadge>
       ))}
+    </div>
+  );
+}
+
+/** Załącznik faktury (skan) — wgraj / podejrzyj / usuń. Dołączany do maili. */
+function InvoiceAttachment({
+  invoiceId,
+  attachmentName,
+}: {
+  invoiceId: string;
+  attachmentName: string | null;
+}) {
+  const [pending, startTransition] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const upload = (file: File) => {
+    const fd = new FormData();
+    fd.append("attachment", file);
+    startTransition(async () => {
+      const r = await uploadInvoiceAttachmentAction(invoiceId, fd);
+      if (r.ok) toast.success(r.message);
+      else toast.error(r.error);
+    });
+  };
+
+  return (
+    <div className="mt-4 border-t pt-4">
+      <div className="mb-2 flex items-center gap-2">
+        <Paperclip className="size-4 text-muted-foreground" />
+        <h4 className="text-sm font-semibold">Faktura (plik)</h4>
+      </div>
+      {attachmentName ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/api/zalaczniki-przychod/${invoiceId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-lg border bg-muted/40 px-3 py-1.5 text-sm hover:bg-accent"
+          >
+            <Download className="size-4 shrink-0" />
+            <span className="truncate">{attachmentName}</span>
+          </a>
+          <Button variant="outline" size="sm" disabled={pending} onClick={() => inputRef.current?.click()}>
+            Zmień
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={pending}
+            onClick={() =>
+              startTransition(async () => {
+                const r = await removeInvoiceAttachmentAction(invoiceId);
+                if (r.ok) toast.success(r.message);
+                else toast.error(r.error);
+              })
+            }
+          >
+            Usuń
+          </Button>
+        </div>
+      ) : (
+        <Button variant="outline" size="sm" disabled={pending} onClick={() => inputRef.current?.click()}>
+          <Paperclip className="size-4" /> Wgraj fakturę (PDF/JPG/PNG)
+        </Button>
+      )}
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
+        Plik dołączymy do maili przypominających o płatności. Maks. 10 MB.
+      </p>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) upload(f);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }
@@ -711,6 +795,10 @@ export function InvoicesTable({
                 {openPosition.notes || "—"}
               </span>
             </DetailRow>
+            <InvoiceAttachment
+              invoiceId={openPosition.id}
+              attachmentName={openPosition.attachmentName}
+            />
             {["ISSUED", "OVERDUE", "PAID"].includes(openPosition.status) && (
               <ReminderTimeline
                 invoiceId={openPosition.id}

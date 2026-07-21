@@ -18,10 +18,18 @@ export async function isLiveNotify(): Promise<boolean> {
   return s.notify_mode === "live";
 }
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export async function sendEmail(args: {
   to: string;
   subject: string;
-  body: string;
+  body: string; // wersja tekstowa (fallback)
+  html?: string; // wersja HTML (brandowana)
+  attachments?: EmailAttachment[];
 }): Promise<NotifyResult> {
   const s = await getSettings();
   if (s.notify_mode !== "live") return { ok: true, simulated: true };
@@ -42,6 +50,12 @@ export async function sendEmail(args: {
       to: args.to,
       subject: args.subject,
       text: args.body,
+      html: args.html,
+      attachments: args.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
     return { ok: true, simulated: false };
   } catch (e) {

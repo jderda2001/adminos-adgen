@@ -8,6 +8,7 @@ import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { dateFromInput, parseMoneyToGr } from "@/lib/format";
 import { computeVatFromNet } from "@/lib/calc";
 import { LEADS_OFFER_TAG, VAT_RATES, type VatRate } from "@/lib/types";
+import { readAttachmentFromForm, removeAttachment, writeAttachment } from "@/lib/attachments";
 
 // ── Wejście formularza (rejestr przychodów — jedna kwota, bez pozycji) ──
 // Program zastępuje arkusz przychodów: wpisujemy pojedynczą kwotę netto,
@@ -355,6 +356,42 @@ export async function undoInvoicePaymentAction(id: string): Promise<ActionResult
   return ok("Zapłata została cofnięta");
 }
 
+// ── Załącznik faktury (plik dołączany do maili przypomnień) ──────────
+
+export async function uploadInvoiceAttachmentAction(
+  invoiceId: string,
+  formData: FormData
+): Promise<ActionResult> {
+  await requireAdmin();
+  const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+  if (!invoice) return fail("Pozycja nie istnieje");
+
+  const read = await readAttachmentFromForm(formData, "attachment");
+  if (!read.ok) return fail(read.error);
+  if (!read.file) return fail("Nie wybrano pliku");
+
+  const saved = await writeAttachment(invoiceId, read.file, invoice.attachmentPath);
+  await db.invoice.update({
+    where: { id: invoiceId },
+    data: { attachmentPath: saved.attachmentPath, attachmentName: saved.attachmentName },
+  });
+  revalidatePath("/finanse/przychody");
+  return ok("Faktura została wgrana");
+}
+
+export async function removeInvoiceAttachmentAction(invoiceId: string): Promise<ActionResult> {
+  await requireAdmin();
+  const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+  if (!invoice) return fail("Pozycja nie istnieje");
+  await removeAttachment(invoice.attachmentPath);
+  await db.invoice.update({
+    where: { id: invoiceId },
+    data: { attachmentPath: null, attachmentName: null },
+  });
+  revalidatePath("/finanse/przychody");
+  return ok("Załącznik usunięty");
+}
+
 // ── Usuwanie ─────────────────────────────────────────────────────────
 
 export async function deleteInvoiceAction(id: string): Promise<ActionResult> {
@@ -362,7 +399,8 @@ export async function deleteInvoiceAction(id: string): Promise<ActionResult> {
   const invoice = await db.invoice.findUnique({ where: { id } });
   if (!invoice) return fail("Pozycja nie istnieje");
 
-  // Ewentualne pozycje usuwa kaskada (onDelete: Cascade w schemacie)
+  // usuń plik faktury z dysku, potem wpis (pozycje usuwa kaskada)
+  await removeAttachment(invoice.attachmentPath);
   await db.invoice.delete({ where: { id } });
   revalidatePath("/finanse/przychody");
   return ok("Pozycja została usunięta");

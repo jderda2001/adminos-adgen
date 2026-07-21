@@ -7,6 +7,8 @@ import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
 import { getSettings } from "@/lib/settings";
 import { sendEmail, sendSms } from "@/lib/notify";
+import { renderReminderEmailHtml } from "@/lib/email-template";
+import { readAttachmentBuffer } from "@/lib/attachments";
 import {
   REMINDER_STEP_BY_KEY,
   renderReminderMessage,
@@ -56,12 +58,32 @@ export async function sendReminderStepAction(input: {
   const footer = [settings.company_name, settings.company_address, settings.reminder_email_footer]
     .filter(Boolean)
     .join("\n");
+  // wersja tekstowa (fallback + snapshot w bazie) — z doklejoną stopką
   const msg = renderReminderMessage(stepKey, channel, { emailFooter: footer });
 
-  const result =
-    channel === "SMS"
-      ? await sendSms({ to, body: msg.body })
-      : await sendEmail({ to, subject: msg.subject ?? "", body: msg.body });
+  let result;
+  if (channel === "SMS") {
+    result = await sendSms({ to, body: msg.body });
+  } else {
+    // e-mail: brandowany HTML + załącznik faktury (jeśli wgrany)
+    const raw = renderReminderMessage(stepKey, "EMAIL"); // treść bez stopki
+    const file = await readAttachmentBuffer(invoice.attachmentPath, invoice.attachmentName);
+    const html = renderReminderEmailHtml({
+      subject: raw.subject ?? "",
+      bodyText: raw.body,
+      footerText: footer,
+      hasAttachment: Boolean(file),
+    });
+    result = await sendEmail({
+      to,
+      subject: msg.subject ?? "",
+      body: msg.body,
+      html,
+      attachments: file
+        ? [{ filename: file.filename, content: file.buffer, contentType: file.contentType }]
+        : undefined,
+    });
+  }
 
   const status = !result.ok ? "FAILED" : result.simulated ? "SIMULATED" : "SENT";
   const data = {

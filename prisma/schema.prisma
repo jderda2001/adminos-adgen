@@ -111,6 +111,9 @@ model Invoice {
   // 55 do dowiezienia); NIE wpływa na kwotę faktury. null = brak gwarancji.
   leadGuaranteePct Int?
   notes     String?
+  // skan/plik faktury — załączany do maili przypominających o płatności
+  attachmentPath String? // nazwa pliku w uploads/ (<invoiceId>.<ext>)
+  attachmentName String? // oryginalna nazwa pliku (do pobrania/załącznika)
   // sekwencja przypomnień o płatności (SMS/e-mail/telefon) wł./wył. per faktura
   remindersEnabled Boolean @default(true)
   createdAt DateTime  @default(now())

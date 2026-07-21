@@ -124,6 +124,7 @@ export default async function RevenuesPage({
     })),
     clientHasEmail: Boolean(inv.client.email),
     clientHasPhone: Boolean(inv.client.phone),
+    attachmentName: inv.attachmentName,
   }));
 
   // KPI miesiąca — na kwotach netto (agregat finansowy liczony netto).
