@@ -89,7 +89,7 @@ export function renderReminderEmailHtml(opts: {
         <tr><td align="center" style="padding:40px 40px 0">${header}</td></tr>
         <tr><td style="padding:26px 40px 0"><div style="height:1px;background:${LINE};line-height:1px;font-size:0">&nbsp;</div></td></tr>
         <!-- Treść -->
-        <tr><td style="padding:28px 40px 4px">
+        <tr><td style="padding:28px 40px ${opts.footerText ? "4px" : "36px"}">
           ${paragraphs(opts.bodyText)}
           ${summaryBox}
           ${attachmentBox}
