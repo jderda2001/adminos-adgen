@@ -323,7 +323,7 @@ export function InvoiceFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="saleDate">Data przychodu *</Label>
+              <Label htmlFor="saleDate">Data wysłania *</Label>
               <DatePicker
                 id="saleDate"
                 name="saleDate"

@@ -693,7 +693,7 @@ export function InvoicesTable({
                 : ""}
             </DetailRow>
             <DetailRow label="Brutto">{formatMoney(openPosition.grossGr)}</DetailRow>
-            <DetailRow label="Data przychodu">
+            <DetailRow label="Data wysłania">
               {formatDate(new Date(openPosition.saleDate))}
             </DetailRow>
             <DetailRow label="Termin płatności">
