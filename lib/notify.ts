@@ -49,25 +49,43 @@ export async function sendEmail(args: {
   }
 }
 
+/** Numer w formacie akceptowanym przez smsplanet: cyfry z kodem kraju (bez +). */
+function normalizeMsisdn(raw: string): string {
+  const digits = raw.replace(/[^\d]/g, "");
+  return digits; // np. "+48 500 600 700" → "48500600700"
+}
+
+// SMS przez smsplanet.pl (API2, uwierzytelnienie Bearer). Endpoint w ustawieniu
+// sms_api_url (domyślnie https://api2.smsplanet.pl/sms). Pola: from (zarejestrowany
+// nadawca), to, msg. Odpowiedź 2xx = przyjęto; body zawiera messageId lub errorMsg.
 export async function sendSms(args: { to: string; body: string }): Promise<NotifyResult> {
   const s = await getSettings();
   if (s.notify_mode !== "live") return { ok: true, simulated: true };
-  if (!s.sms_api_url) {
-    return { ok: false, simulated: false, error: "Brak konfiguracji API SMS (endpoint)" };
+  const url = s.sms_api_url || "https://api2.smsplanet.pl/sms";
+  if (!s.sms_api_key) {
+    return { ok: false, simulated: false, error: "Brak klucza API SMS (smsplanet)" };
+  }
+  if (!s.sms_sender) {
+    return { ok: false, simulated: false, error: "Brak nadawcy SMS (zarejestrowany w smsplanet)" };
   }
   try {
-    // Generyczny POST JSON — kształt do dostrojenia pod konkretnego dostawcę,
-    // gdy użytkownik poda API. Trzymamy klucz w nagłówku Authorization.
-    const res = await fetch(s.sms_api_url, {
+    const form = new URLSearchParams({
+      from: s.sms_sender,
+      to: normalizeMsisdn(args.to),
+      msg: args.body,
+    });
+    const res = await fetch(url, {
       method: "POST",
       headers: {
-        "content-type": "application/json",
-        ...(s.sms_api_key ? { authorization: `Bearer ${s.sms_api_key}` } : {}),
+        authorization: `Bearer ${s.sms_api_key}`,
+        "content-type": "application/x-www-form-urlencoded",
       },
-      body: JSON.stringify({ to: args.to, message: args.body, from: s.sms_sender || undefined }),
+      body: form.toString(),
     });
-    if (!res.ok) {
-      return { ok: false, simulated: false, error: `SMS API HTTP ${res.status}` };
+    const text = await res.text();
+    // smsplanet zwraca JSON; błąd sygnalizuje polem errorMsg/errorCode nawet przy 200
+    if (!res.ok || /error/i.test(text)) {
+      return { ok: false, simulated: false, error: `smsplanet: ${text.slice(0, 200)}` };
     }
     return { ok: true, simulated: false };
   } catch (e) {

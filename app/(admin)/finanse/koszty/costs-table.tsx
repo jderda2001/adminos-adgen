@@ -48,6 +48,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -80,6 +87,7 @@ import {
   toggleDelayedAction,
   rollCostToNextMonthAction,
   patchCostAction,
+  updateRecurringCopyAmountAction,
   addCostCommentAction,
   deleteCostCommentAction,
 } from "./actions";
@@ -272,8 +280,15 @@ function InlineSupplier({ cost }: { cost: CostRow }) {
   );
 }
 
-/** Kwota netto edytowalna po kliknięciu (VAT/brutto przeliczane serwerowo) */
-function InlineNet({ cost }: { cost: CostRow }) {
+/** Kwota netto edytowalna po kliknięciu (VAT/brutto przeliczane serwerowo).
+ * Dla kopii kosztu cyklicznego zmiana kwoty pyta o zasięg (ten miesiąc / +następne). */
+function InlineNet({
+  cost,
+  onRecurringEdit,
+}: {
+  cost: CostRow;
+  onRecurringEdit: (cost: CostRow, netGr: number) => void;
+}) {
   const { pending, run } = useCostPatch();
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState("");
@@ -295,7 +310,10 @@ function InlineNet({ cost }: { cost: CostRow }) {
   const save = () => {
     setEditing(false);
     const gr = parseMoneyToGr(val);
-    if (gr !== null && gr !== cost.netGr) run(cost.id, { netGr: gr });
+    if (gr === null || gr === cost.netGr) return;
+    // kopia cykliczna → zapytaj o zasięg zmiany zamiast od razu zapisywać
+    if (cost.recurringCostId) onRecurringEdit(cost, gr);
+    else run(cost.id, { netGr: gr });
   };
   return (
     <Input
@@ -493,6 +511,7 @@ export function CostsTable({
   const [search, setSearch] = useState("");
   const [detail, setDetail] = useState<CostRow | null>(null);
   const [adBudgetOpen, setAdBudgetOpen] = useState(false);
+  const [recurringNet, setRecurringNet] = useState<{ cost: CostRow; netGr: number } | null>(null);
   const [toDelete, setToDelete] = useState<CostRow | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -685,7 +704,7 @@ export function CostsTable({
             </div>
           ) : (
           <div className="flex justify-end">
-            <InlineNet cost={row.original} />
+            <InlineNet cost={row.original} onRecurringEdit={(c, gr) => setRecurringNet({ cost: c, netGr: gr })} />
           </div>
           ),
       },
@@ -1218,6 +1237,58 @@ export function CostsTable({
           )}
         </DetailSheet>
       )}
+
+      {/* ── Koszt cykliczny: zakres zmiany kwoty ────────────────── */}
+      <Dialog open={recurringNet !== null} onOpenChange={(o) => !o && setRecurringNet(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Koszt cykliczny — zakres zmiany</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              „{recurringNet?.cost.supplierName}” — nowa kwota netto{" "}
+              <span className="font-medium text-foreground">
+                {recurringNet ? formatMoney(recurringNet.netGr) : ""}
+              </span>
+              .
+            </p>
+            <p>Zmienić tylko w tym miesiącu, czy w tym i każdym następnym (oraz w szablonie)?</p>
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => {
+                const rec = recurringNet;
+                if (!rec) return;
+                startTransition(async () => {
+                  const r = await updateRecurringCopyAmountAction(rec.cost.id, rec.netGr, "this");
+                  if (r.ok) toast.success(r.message);
+                  else toast.error(r.error);
+                  setRecurringNet(null);
+                });
+              }}
+            >
+              Tylko ten miesiąc
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                const rec = recurringNet;
+                if (!rec) return;
+                startTransition(async () => {
+                  const r = await updateRecurringCopyAmountAction(rec.cost.id, rec.netGr, "future");
+                  if (r.ok) toast.success(r.message);
+                  else toast.error(r.error);
+                  setRecurringNet(null);
+                });
+              }}
+            >
+              Ten i następne
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={toDelete !== null}

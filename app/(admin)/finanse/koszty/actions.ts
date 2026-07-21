@@ -461,6 +461,65 @@ export async function patchCostAction(
   return ok("Zapisano");
 }
 
+/**
+ * Zmiana KWOTY netto kopii kosztu cyklicznego z wyborem zasięgu:
+ *  - "this"   → tylko ta kopia (ten miesiąc),
+ *  - "future" → ta kopia + szablon (przyszłe generacje) + istniejące przyszłe,
+ *               nieopłacone kopie (docDate > tej). Przeszłość bez zmian.
+ * VAT/brutto przeliczane ze stawki każdej kopii.
+ */
+export async function updateRecurringCopyAmountAction(
+  costId: string,
+  netGr: number,
+  scope: "this" | "future"
+): Promise<ActionResult> {
+  await requireAdmin();
+  if (!Number.isInteger(netGr) || netGr < 0) return fail("Podaj poprawną kwotę netto");
+  const existing = await db.cost.findUnique({ where: { id: costId } });
+  if (!existing) return fail("Koszt nie istnieje");
+
+  const recompute = (net: number, rate: string) => {
+    const vr: VatRate = isVatRate(rate) ? rate : "23";
+    const { vatGr, grossGr } = computeVatFromNet(net, vr);
+    return { netGr: net, vatGr, grossGr };
+  };
+
+  await db.cost.update({ where: { id: costId }, data: recompute(netGr, existing.vatRate) });
+
+  let futureCount = 0;
+  if (scope === "future" && existing.recurringCostId) {
+    // szablon → przyszłe generacje ruszą z nową kwotą
+    await db.recurringCost.update({
+      where: { id: existing.recurringCostId },
+      data: { netGr },
+    });
+    // istniejące przyszłe, nieopłacone kopie
+    const future = await db.cost.findMany({
+      where: {
+        recurringCostId: existing.recurringCostId,
+        paid: false,
+        id: { not: costId },
+        docDate: { gt: existing.docDate },
+      },
+      select: { id: true, vatRate: true },
+    });
+    for (const f of future) {
+      await db.cost.update({ where: { id: f.id }, data: recompute(netGr, f.vatRate) });
+    }
+    futureCount = future.length;
+  }
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(RW_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  return ok(
+    scope === "future"
+      ? `Zmieniono w tym miesiącu, szablonie i ${futureCount} kolejnych kopiach`
+      : "Zmieniono kwotę tylko w tym miesiącu"
+  );
+}
+
 export async function deleteCostAction(id: string): Promise<ActionResult> {
   await requireAdmin();
   const existing = await db.cost.findUnique({ where: { id } });

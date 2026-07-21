@@ -10,7 +10,6 @@ import { getAdBudgetCategoryIds } from "@/lib/settings";
 import { monthKey } from "@/lib/periods";
 import { formatMonth, todayUTC } from "@/lib/format";
 import { PageHeader } from "@/components/page-header";
-import { AdBudgetAutoRow } from "./ad-budget-auto-row";
 import { buildCostFilters, type CostFilterParams } from "./filters";
 import { CostsTable, type CostRow } from "./costs-table";
 import { PendingCosts, type PendingCostRow } from "./pending-costs";
@@ -241,12 +240,6 @@ export default async function CostsPage({
         description="Rejestr kosztów adGen — wydatki, koszty cykliczne, pozycje do potwierdzenia."
       />
       <div className="space-y-4">
-        {showAutoAdBudget && (
-          <AdBudgetAutoRow
-            monthLabel={formatMonth(selectedMonth)}
-            estimateGr={adBudgetEstimateGr}
-          />
-        )}
         {pendingRows.length > 0 && <PendingCosts items={pendingRows} />}
         <CostsTable
           costs={rows}
