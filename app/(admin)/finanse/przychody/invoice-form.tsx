@@ -252,7 +252,7 @@ export function InvoiceFormDialog({
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="clientId">Klient *</Label>
               <SearchableSelect
@@ -275,7 +275,7 @@ export function InvoiceFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="net">Kwota netto (zł) *</Label>
               <Input
@@ -335,7 +335,7 @@ export function InvoiceFormDialog({
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="saleDate">Data wysłania *</Label>
               <DatePicker
@@ -354,7 +354,7 @@ export function InvoiceFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="number">Nr faktury (opcjonalnie)</Label>
               <Input
@@ -447,7 +447,7 @@ export function InvoiceFormDialog({
                 Liczba leadów × cena jednostkowa wyliczają kwotę netto faktury. */}
             {hasLeads && (
               <div className="space-y-2.5 rounded-md border bg-muted/30 p-2.5">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="leadsQty">Liczba leadów</Label>
                     <Input
@@ -469,7 +469,7 @@ export function InvoiceFormDialog({
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="leadActivationFee">Opłata aktywacyjna (netto, zł)</Label>
                     <Input

@@ -19,7 +19,9 @@ export default async function AdminLayout({
         logoutAction={logoutAction}
         showLogout={!isAuthDisabled()}
       />
-      <main className="min-w-0 flex-1 px-6 py-6 lg:px-8">
+      {/* pt na mobile robi miejsce na stały górny pasek (h-14); na desktopie
+          standardowy padding. px węższe na telefonie dla większej szerokości treści. */}
+      <main className="min-w-0 flex-1 px-4 pb-10 pt-[4.5rem] sm:px-6 lg:px-8 lg:py-6">
         <div className="mx-auto max-w-[1400px]">
           {user.mustChangePassword ? <ForcePasswordChange /> : children}
         </div>

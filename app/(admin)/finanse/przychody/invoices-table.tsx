@@ -934,7 +934,7 @@ export function InvoicesTable({
       {/* ── Belka akcji masowych (pojawia się przy zaznaczeniu) ── */}
       {selectedCount > 0 && (
         <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
-          <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900 p-1.5 text-neutral-100 shadow-2xl dark:bg-neutral-800">
+          <div className="pointer-events-auto flex max-w-[calc(100vw-2rem)] items-center gap-1 overflow-x-auto rounded-2xl border border-white/10 bg-neutral-900 p-1.5 text-neutral-100 shadow-2xl dark:bg-neutral-800">
             <span className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-medium">
               {selectedCount} {pluralPl(selectedCount, "pozycja", "pozycje", "pozycji")}
               <button
@@ -1119,7 +1119,7 @@ export function InvoicesTable({
           <DialogHeader>
             <DialogTitle>Ustaw kwotę netto</DialogTitle>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="bulk-net">Kwota netto (zł)</Label>
               <Input

@@ -121,7 +121,7 @@ function AccountRow({
           </div>
         </div>
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger size="sm" className="w-56 shrink-0">
+          <SelectTrigger size="sm" className="w-40 shrink-0 sm:w-56">
             <SelectValue placeholder="Czyje to konto?" />
           </SelectTrigger>
           <SelectContent>

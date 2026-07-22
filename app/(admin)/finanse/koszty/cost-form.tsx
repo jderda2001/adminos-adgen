@@ -149,7 +149,7 @@ export function CostFormDialog({
             </datalist>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="docDate">Data wystawienia *</Label>
               <DatePicker
@@ -173,7 +173,7 @@ export function CostFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="amount">
@@ -235,7 +235,7 @@ export function CostFormDialog({
               : "Podaj kwotę, aby zobaczyć rozbicie netto / VAT / brutto"}
           </p>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="categoryId">Kategoria *</Label>
               <Select name="categoryId" defaultValue={cost?.categoryId ?? categories[0]?.id}>
@@ -266,7 +266,7 @@ export function CostFormDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 items-end gap-3">
+          <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2">
             <div className="flex h-9 items-center gap-2">
               <Checkbox
                 id="paidCheckbox"

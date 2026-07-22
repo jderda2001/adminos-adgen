@@ -145,7 +145,7 @@ export default async function ClientProfitabilityPage({
           <KpiCard label="Marża" value={formatPercent(kpi.marginFraction)} />
         </div>
 
-        <div className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+        <div className="min-w-0 rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
           <h2 className="font-heading text-base font-semibold">
             Rentowność miesięczna
           </h2>
@@ -160,7 +160,7 @@ export default async function ClientProfitabilityPage({
         </div>
 
         <div className="grid gap-4 xl:grid-cols-2">
-          <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+          <section className="min-w-0 rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
             <h2 className="font-heading text-base font-semibold">
               Faktury w okresie{" "}
               <span className="text-sm font-normal text-muted-foreground">
@@ -229,7 +229,7 @@ export default async function ClientProfitabilityPage({
             </div>
           </section>
 
-          <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+          <section className="min-w-0 rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
             <h2 className="font-heading text-base font-semibold">
               Koszty przypisane w okresie
             </h2>
@@ -293,7 +293,7 @@ export default async function ClientProfitabilityPage({
         </div>
 
         {(leadCosts.rows.length > 0 || client.billingModel === "PAKIETY_LEADOW") && (
-          <section className="rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
+          <section className="min-w-0 rounded-xl border bg-card p-4 shadow-[var(--shadow-card)]">
             <h2 className="font-heading text-base font-semibold">
               Leady w okresie
             </h2>

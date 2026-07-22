@@ -78,7 +78,7 @@ export function InviteMemberDialog({
               placeholder="np. Anna Kowalska"
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="invite-email">E-mail *</Label>
               <Input
@@ -105,7 +105,7 @@ export function InviteMemberDialog({
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="invite-rate">Stawka kosztowa (zł/h)</Label>
               <Input
@@ -187,7 +187,7 @@ export function EditMemberDialog({
               defaultValue={member.name}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="edit-email">E-mail *</Label>
               <Input

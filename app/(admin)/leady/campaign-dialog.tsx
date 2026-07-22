@@ -117,7 +117,7 @@ export function CampaignDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="campaign-brand">Marka *</Label>
               <Select value={brandId} onValueChange={setBrandId}>
@@ -151,7 +151,7 @@ export function CampaignDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="campaign-spend">Wydatki netto (zł) *</Label>
               <Input

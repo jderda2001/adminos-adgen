@@ -95,7 +95,7 @@ function BudgetDialog({ row }: { row: BudgetRow }) {
           <DialogTitle className="capitalize">Plan — {RW_MONTH_LABELS[row.month - 1]}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="b-rev">Przychód (netto, zł)</Label>
               <Input id="b-rev" inputMode="decimal" value={revenue} onChange={(e) => setRevenue(e.target.value)} placeholder="0,00" />
@@ -105,7 +105,7 @@ function BudgetDialog({ row }: { row: BudgetRow }) {
               <Input id="b-cost" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0,00" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="b-leads">Leady (szt.)</Label>
               <Input id="b-leads" inputMode="numeric" value={leads} onChange={(e) => setLeads(e.target.value)} placeholder="opcjonalnie" />

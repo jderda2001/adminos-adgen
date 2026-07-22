@@ -119,7 +119,7 @@ export function ClientFormDialog({
               placeholder="np. Kowalski i Wspólnicy sp. z o.o."
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="nip">NIP</Label>
               <Input
@@ -138,7 +138,7 @@ export function ClientFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="email">E-mail</Label>
               <Input
@@ -165,7 +165,7 @@ export function ClientFormDialog({
               defaultValue={client?.address ?? ""}
             />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="billingModel">Model rozliczeń *</Label>
               <Select
@@ -199,7 +199,7 @@ export function ClientFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="status">Status *</Label>
               <Select name="status" defaultValue={client?.status ?? "ACTIVE"}>
@@ -227,7 +227,7 @@ export function ClientFormDialog({
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="endDate">Data zakończenia</Label>
               <DatePicker
@@ -258,7 +258,7 @@ export function ClientFormDialog({
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="billingTiming">Rozliczenie *</Label>
               <Select

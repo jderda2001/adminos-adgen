@@ -136,11 +136,11 @@ function CategoryItem({
   }
 
   return (
-    <form onSubmit={handleRename} className="flex items-center gap-2 py-1.5">
+    <form onSubmit={handleRename} className="flex flex-wrap items-center gap-2 py-1.5 sm:flex-nowrap">
       <Input
         value={name}
         onChange={(e) => setName(e.target.value)}
-        className="h-8 flex-1"
+        className="h-8 w-full min-w-0 flex-1 sm:w-auto"
         aria-label={`Nazwa kategorii ${category.name}`}
       />
       {category.isSalary && (

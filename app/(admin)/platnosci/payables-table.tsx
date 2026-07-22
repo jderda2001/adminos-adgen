@@ -479,7 +479,7 @@ export function PayablesTable({ payables }: { payables: PayableRow[] }) {
             placeholder="Szukaj po dostawcy, nr dokumentu, kategorii…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-72"
+            className="h-8 w-full sm:w-72"
           />
         </div>
 

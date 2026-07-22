@@ -164,7 +164,7 @@ export function DeliveryDialog({
             </Select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="delivery-vertical">Wertykal *</Label>
               <Select value={vertical} onValueChange={setVertical}>
@@ -207,7 +207,7 @@ export function DeliveryDialog({
             </p>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="delivery-leads">Liczba leadów *</Label>
               <Input

@@ -280,8 +280,8 @@ export function CostImportDialog({ trigger }: { trigger?: ReactNode }) {
               </span>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">
-              <table className="w-full text-sm">
+            <div className="min-h-0 flex-1 overflow-auto rounded-lg border">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="sticky top-0 z-10 bg-muted/95 text-[11px] uppercase tracking-wide text-muted-foreground backdrop-blur">
                   <tr className="[&>th]:px-2 [&>th]:py-2 [&>th]:text-left">
                     <th className="w-24">Data</th>

@@ -240,7 +240,7 @@ export function ReceivablesTable({
           placeholder="Szukaj po numerze faktury, kliencie…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 w-72"
+          className="h-8 w-full sm:w-72"
         />
       </div>
 
