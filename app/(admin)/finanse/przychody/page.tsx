@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { refreshInvoiceStatuses, getActiveVerticalNames } from "@/lib/reports";
-import { resolvePeriod } from "@/lib/periods";
+import { resolvePeriod, monthKey } from "@/lib/periods";
 import { INVOICE_STATUSES, VAT_RATES, VAT_RATE_FRACTIONS } from "@/lib/types";
 import { todayUTC } from "@/lib/format";
 import type { ExistingReminder } from "@/lib/payment-reminders";
@@ -37,6 +37,10 @@ function inferVatRate(netGr: number, vatGr: number): string {
     }
   }
   return best;
+}
+
+function splitTags(raw: string | null): string[] {
+  return (raw ?? "").split(",").map((t) => t.trim()).filter(Boolean);
 }
 
 export default async function RevenuesPage({
@@ -127,6 +131,103 @@ export default async function RevenuesPage({
     attachmentName: inv.attachmentName,
   }));
 
+  // ── Estymacja przyszłego miesiąca ────────────────────────────────────
+  // Umowy w toku (typ INDEFINITE_NOTICE, aktywne) kopiują kwotę z OSTATNIEGO
+  // zafakturowanego miesiąca 1:1 na kolejne miesiące — dopóki nie ma
+  // wypowiedzenia (endDate). Pozycje „Estymacja" są syntetyczne (read-only) i
+  // znikają, gdy klient dostanie realny przychód w tym miesiącu.
+  const currentMonth = monthKey(todayUTC());
+  const selectedMonth = monthKey(period.from);
+  const lastDayOfPeriod = new Date(period.to.getTime() - 86_400_000);
+  const singleMonth = monthKey(lastDayOfPeriod) === selectedMonth;
+  const doEstimate = singleMonth && selectedMonth > currentMonth && !statusFilter;
+  let estimatedMonth = false;
+
+  if (doEstimate) {
+    const invoicedClientIds = new Set(invoices.map((i) => i.clientId));
+    const ongoing = await db.client.findMany({
+      where: {
+        status: "ACTIVE",
+        contractType: "INDEFINITE_NOTICE",
+        ...(clientFilter ? { id: clientFilter } : {}),
+      },
+      select: { id: true, name: true, email: true, phone: true, startDate: true, endDate: true },
+    });
+    const eligible = ongoing.filter((c) => {
+      if (invoicedClientIds.has(c.id)) return false; // realny przychód już jest
+      const startOk = !c.startDate || monthKey(c.startDate) <= selectedMonth;
+      const endOk = !c.endDate || selectedMonth <= monthKey(c.endDate); // po wypowiedzeniu → stop
+      return startOk && endOk;
+    });
+    if (eligible.length > 0) {
+      // ostatni zafakturowany miesiąc (przed wybranym) per klient — kwota do kopii
+      const prior = await db.invoice.findMany({
+        where: {
+          clientId: { in: eligible.map((c) => c.id) },
+          status: { not: "DRAFT" },
+          saleDate: { lt: period.from },
+        },
+        select: { clientId: true, saleDate: true, netGr: true, vatGr: true, grossGr: true, offerTags: true },
+        orderBy: { saleDate: "desc" },
+      });
+      const carry = new Map<
+        string,
+        { month: string; netGr: number; vatGr: number; grossGr: number; tags: Set<string> }
+      >();
+      for (const inv of prior) {
+        const m = monthKey(inv.saleDate);
+        const cur = carry.get(inv.clientId);
+        if (!cur) {
+          carry.set(inv.clientId, {
+            month: m,
+            netGr: inv.netGr,
+            vatGr: inv.vatGr,
+            grossGr: inv.grossGr,
+            tags: new Set(splitTags(inv.offerTags)),
+          });
+        } else if (m === cur.month) {
+          cur.netGr += inv.netGr;
+          cur.vatGr += inv.vatGr;
+          cur.grossGr += inv.grossGr;
+          for (const t of splitTags(inv.offerTags)) cur.tags.add(t);
+        }
+      }
+      const iso = period.from.toISOString();
+      for (const c of eligible) {
+        const cc = carry.get(c.id);
+        if (!cc || cc.netGr <= 0) continue;
+        rows.push({
+          id: `est-${c.id}`,
+          number: "",
+          label: "Estymacja — kopia z poprzedniego miesiąca",
+          clientId: c.id,
+          clientName: c.name,
+          issueDate: iso,
+          saleDate: iso,
+          dueDate: iso,
+          paidDate: null,
+          status: "ESTYMACJA",
+          netGr: cc.netGr,
+          vatGr: cc.vatGr,
+          grossGr: cc.grossGr,
+          vatRate: inferVatRate(cc.netGr, cc.vatGr),
+          offerTags: [...cc.tags].join(",") || null,
+          notes: null,
+          leadsQty: null,
+          leadUnitPriceGr: null,
+          leadActivationFeeGr: null,
+          leadGuaranteePct: null,
+          remindersEnabled: false,
+          reminders: [],
+          clientHasEmail: Boolean(c.email),
+          clientHasPhone: Boolean(c.phone),
+          attachmentName: null,
+        });
+        estimatedMonth = true;
+      }
+    }
+  }
+
   // KPI miesiąca — na kwotach netto (agregat finansowy liczony netto).
   // „Zafakturowane niezapłacone" = wysłane + przeterminowane; „Zapłacone" = PAID.
   const kpis: RevenueKpis = rows.reduce<RevenueKpis>(
@@ -152,6 +253,7 @@ export default async function RevenuesPage({
       kpis={kpis}
       leadVerticals={leadVerticals}
       todayIso={todayUTC().toISOString()}
+      estimatedMonth={estimatedMonth}
     />
   );
 }

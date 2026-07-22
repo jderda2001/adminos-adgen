@@ -58,6 +58,7 @@ const INVOICE_TONE: Record<string, StatusTone> = {
   NO_INVOICE: "indigo",
   PAID: "green",
   OVERDUE: "red",
+  ESTYMACJA: "neutral", // syntetyczna prognoza (umowa w toku) — wyszarzona
 };
 
 /** Ton dla statusu faktury/przychodu */

@@ -154,6 +154,7 @@ const REVENUE_STATUS_LABELS: Record<string, string> = {
   ISSUED: "Wysłana",
   PAID: "Opłacona",
   OVERDUE: "Przeterminowana",
+  ESTYMACJA: "Estymacja",
 };
 
 function statusLabel(status: string): string {
@@ -325,12 +326,14 @@ export function InvoicesTable({
   kpis,
   leadVerticals,
   todayIso,
+  estimatedMonth = false,
 }: {
   invoices: InvoiceRow[];
   clients: ClientOption[];
   kpis: RevenueKpis;
   leadVerticals: string[];
   todayIso: string;
+  estimatedMonth?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -714,6 +717,14 @@ export function InvoicesTable({
         </Select>
       </div>
 
+      {estimatedMonth && (
+        <div className="rounded-xl border border-dashed border-border bg-muted/30 px-4 py-2.5 text-sm text-muted-foreground">
+          Miesiąc przyszły — pozycje <span className="font-medium text-foreground">„Estymacja"</span>{" "}
+          to kopie z ostatniego zafakturowanego miesiąca dla umów w toku. Znikają, gdy dodasz realny
+          przychód; zatrzymują się po złożeniu wypowiedzenia (Klienci).
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         data={groups}
@@ -781,7 +792,19 @@ export function InvoicesTable({
               : undefined
         }
         footer={
-          openPosition && (
+          openPosition && openPosition.status === "ESTYMACJA" ? (
+            <InvoiceFormDialog
+              clients={clients}
+              leadVerticals={leadVerticals}
+              defaultClientId={openPosition.clientId}
+              trigger={
+                <Button size="sm">
+                  <Plus className="size-4" /> Dodaj realny przychód
+                </Button>
+              }
+            />
+          ) : (
+            openPosition && (
             <div className="flex flex-wrap items-center gap-2">
               <InvoiceFormDialog
                 invoice={openPosition}
@@ -827,6 +850,7 @@ export function InvoicesTable({
                 <Trash2 className="size-4" /> Usuń
               </Button>
             </div>
+            )
           )
         }
       >
