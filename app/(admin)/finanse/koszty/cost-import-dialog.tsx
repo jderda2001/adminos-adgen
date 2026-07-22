@@ -195,10 +195,10 @@ export function CostImportDialog({ trigger }: { trigger?: ReactNode }) {
                 Rozpoznaję kolumny: <span className="font-medium text-foreground">Data, Faktura/Dostawca,
                 Kategoria, Wartość netto, Wartość Brutto</span>. Daty mogą być słowne („1 sierpnia") —
                 dlatego wskaż <span className="font-medium text-foreground">rok</span> pliku. Każdy wiersz
-                trafia do Kosztów i do Rachunku wyników.
+                trafia wyłącznie do rejestru Kosztów (nie do Rachunku wyników).
               </>
             ) : (
-              <>Popraw kategorię (RW) i VAT. Kwoty to netto; koszty oznaczamy jako opłacone.</>
+              <>Popraw kategorię i VAT. Kwoty to netto; koszty oznaczamy jako opłacone.</>
             )}
           </DialogDescription>
         </DialogHeader>
@@ -288,7 +288,7 @@ export function CostImportDialog({ trigger }: { trigger?: ReactNode }) {
                     <th>Pozycja</th>
                     <th className="w-28 text-right">Netto</th>
                     <th className="w-24">VAT</th>
-                    <th className="w-52">Kategoria (RW)</th>
+                    <th className="w-52">Kategoria</th>
                   </tr>
                 </thead>
                 <tbody>

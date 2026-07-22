@@ -6,13 +6,16 @@
 // klient z kilkoma usługami (np. leady + obdzwanianie w call center) jest jednym
 // wpisem, a pozycje rozróżnialne w środku.
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
   ArrowLeft,
   BadgeCheck,
   ChevronRight,
+  CircleDot,
+  Coins,
+  CopyPlus,
   Download,
   Mail,
   MessageSquare,
@@ -21,7 +24,9 @@ import {
   Plus,
   RotateCcw,
   Send,
+  Tag,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, SortableHeader } from "@/components/data-table";
@@ -32,9 +37,19 @@ import { KpiCard } from "@/components/kpi-card";
 import { StatusBadge, invoiceTone } from "@/components/status-badge";
 import { DetailSheet, DetailRow } from "@/components/detail-sheet";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/date-picker";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TableCell } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,6 +77,7 @@ import {
 import {
   INVOICE_STATUSES,
   INVOICE_STATUS_LABELS,
+  VAT_RATES,
   VAT_RATE_LABELS,
   isVatRate,
   type InvoiceStatus,
@@ -83,6 +99,11 @@ import {
   undoInvoicePaymentAction,
   uploadInvoiceAttachmentAction,
   removeInvoiceAttachmentAction,
+  bulkDeleteInvoicesAction,
+  bulkDuplicateInvoicesAction,
+  bulkSetInvoiceStatusAction,
+  bulkSetInvoiceTagsAction,
+  bulkSetInvoiceAmountAction,
 } from "./actions";
 import { ReminderTimeline } from "./reminder-timeline";
 import { sendReminderStepAction } from "./reminder-actions";
@@ -156,6 +177,20 @@ const REVENUE_STATUS_LABELS: Record<string, string> = {
   OVERDUE: "Przeterminowana",
   ESTYMACJA: "Estymacja",
 };
+
+// statusy oferowane w masowej zmianie statusu (bez OVERDUE — wyliczany automatycznie)
+const BULK_STATUSES = [
+  "ISSUED",
+  "PAID",
+  "DRAFT",
+  "WAITING",
+  "NOT_ISSUED",
+  "NO_INVOICE",
+] as const;
+
+// wspólny styl przycisku w ciemnej belce akcji masowych
+const BULK_BAR_BTN =
+  "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium text-neutral-100 transition-colors hover:bg-white/10 disabled:opacity-40";
 
 function statusLabel(status: string): string {
   return (
@@ -350,6 +385,18 @@ export function InvoicesTable({
   const [toMarkPaid, setToMarkPaid] = useState<InvoiceRow | null>(null);
   const [paidDate, setPaidDate] = useState("");
 
+  // ── Zaznaczanie pozycji (akcje masowe, styl ClickUp) ──────────────
+  // Trzymamy ID realnych pozycji (nie „Estymacji"). Checkbox na wierszu
+  // klienta zaznacza wszystkie jego pozycje. Belka akcji na dole pojawia
+  // się, gdy coś jest zaznaczone.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkTagsOpen, setBulkTagsOpen] = useState(false);
+  const [bulkTags, setBulkTags] = useState("");
+  const [bulkAmountOpen, setBulkAmountOpen] = useState(false);
+  const [bulkNet, setBulkNet] = useState("");
+  const [bulkVat, setBulkVat] = useState<string>("23");
+
   const clientFilter = searchParams.get("klient") ?? "all";
   const statusFilter = searchParams.get("status") ?? "all";
   const queryString = searchParams.toString();
@@ -432,6 +479,79 @@ export function InvoicesTable({
     [invoices]
   );
 
+  // ── Zaznaczanie: pomocnicze ───────────────────────────────────────
+  // realne (niesyntetyczne) ID pozycji per klient + globalnie
+  const idsByGroup = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const g of groups) {
+      m.set(
+        g.clientId,
+        g.positions.filter((p) => p.status !== "ESTYMACJA").map((p) => p.id)
+      );
+    }
+    return m;
+  }, [groups]);
+  const allSelectableIds = useMemo(
+    () => invoices.filter((i) => i.status !== "ESTYMACJA").map((i) => i.id),
+    [invoices]
+  );
+
+  // po zmianie danych (nawigacja/rewalidacja) usuń z zaznaczenia nieistniejące ID
+  useEffect(() => {
+    const valid = new Set(allSelectableIds);
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [allSelectableIds]);
+
+  const selectedCount = selectedIds.size;
+  const headerChecked: boolean | "indeterminate" =
+    allSelectableIds.length > 0 && selectedCount === allSelectableIds.length
+      ? true
+      : selectedCount > 0
+        ? "indeterminate"
+        : false;
+
+  function groupChecked(g: ClientGroup): boolean {
+    const ids = idsByGroup.get(g.clientId) ?? [];
+    return ids.length > 0 && ids.every((id) => selectedIds.has(id));
+  }
+  function toggleGroup(g: ClientGroup, checked: boolean) {
+    const ids = idsByGroup.get(g.clientId) ?? [];
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) checked ? next.add(id) : next.delete(id);
+      return next;
+    });
+  }
+  function toggleAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(allSelectableIds) : new Set());
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+
+  // wykonaj akcję masową i po sukcesie wyczyść zaznaczenie
+  function runBulk(action: () => Promise<ActionResult>) {
+    startTransition(async () => {
+      const r = await action();
+      if (r.ok) {
+        toast.success(r.message);
+        clearSelection();
+      } else {
+        toast.error(r.error);
+      }
+    });
+  }
+
+  const selectedIdList = () => [...selectedIds];
+
   // szybka wysyłka z listy: aktualny krok przypomnień dla wskazanych pozycji
   function sendReminders(targets: ReminderTarget[], channel: "SMS" | "EMAIL") {
     if (targets.length === 0) return;
@@ -495,6 +615,41 @@ export function InvoicesTable({
 
   const columns: ColumnDef<ClientGroup>[] = useMemo(
     () => [
+      {
+        id: "select",
+        enableSorting: false,
+        header: () => (
+          <Checkbox
+            aria-label="Zaznacz wszystkie"
+            checked={headerChecked}
+            onCheckedChange={(c) => toggleAll(c === true)}
+          />
+        ),
+        cell: ({ row }) => {
+          const g = row.original;
+          const ids = idsByGroup.get(g.clientId) ?? [];
+          if (ids.length === 0) return null; // „Estymacja" — nie do zaznaczenia
+          const checked = groupChecked(g);
+          return (
+            <div
+              className="flex items-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Checkbox
+                aria-label={`Zaznacz: ${g.clientName}`}
+                checked={checked}
+                onCheckedChange={(c) => toggleGroup(g, c === true)}
+                className={cn(
+                  "transition-opacity",
+                  checked
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                )}
+              />
+            </div>
+          );
+        },
+      },
       {
         id: "status",
         header: "Status",
@@ -635,7 +790,8 @@ export function InvoicesTable({
         ),
       },
     ],
-    [totals.netGr, pending]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [totals.netGr, pending, selectedIds, idsByGroup, headerChecked]
   );
 
   const newInvoiceTrigger = (
@@ -733,9 +889,12 @@ export function InvoicesTable({
           setOpenClientId(g.clientId);
           setOpenPositionId(null);
         }}
-        rowClassName={() => "cursor-pointer"}
+        rowClassName={(g) =>
+          cn("group cursor-pointer", groupChecked(g) && "bg-primary/5")
+        }
         footer={
           <>
+            <TableCell />
             <TableCell colSpan={2} className="font-medium">
               Razem ({groups.length}{" "}
               {pluralPl(groups.length, "klient", "klienci", "klientów")} ·{" "}
@@ -771,6 +930,245 @@ export function InvoicesTable({
           </EmptyState>
         }
       />
+
+      {/* ── Belka akcji masowych (pojawia się przy zaznaczeniu) ── */}
+      {selectedCount > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900 p-1.5 text-neutral-100 shadow-2xl dark:bg-neutral-800">
+            <span className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-medium">
+              {selectedCount} {pluralPl(selectedCount, "pozycja", "pozycje", "pozycji")}
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="grid size-4 place-items-center rounded text-neutral-400 transition-colors hover:text-white"
+                aria-label="Wyczyść zaznaczenie"
+              >
+                <X className="size-4" />
+              </button>
+            </span>
+            <div className="mx-1 h-6 w-px bg-white/15" />
+
+            {/* Status */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={pending} className={BULK_BAR_BTN}>
+                  <CircleDot className="size-4" /> Status
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="center">
+                <DropdownMenuLabel>Ustaw status</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {BULK_STATUSES.map((s) => (
+                  <DropdownMenuItem
+                    key={s}
+                    onClick={() =>
+                      runBulk(() => bulkSetInvoiceStatusAction(selectedIdList(), s))
+                    }
+                  >
+                    <StatusBadge tone={invoiceTone(s)}>{statusLabel(s)}</StatusBadge>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Tagi */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setBulkTags("");
+                setBulkTagsOpen(true);
+              }}
+              className={BULK_BAR_BTN}
+            >
+              <Tag className="size-4" /> Tagi
+            </button>
+
+            {/* Kwota */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setBulkNet("");
+                setBulkVat("23");
+                setBulkAmountOpen(true);
+              }}
+              className={BULK_BAR_BTN}
+            >
+              <Coins className="size-4" /> Kwota
+            </button>
+
+            {/* Duplikuj na kolejne miesiące */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={pending} className={BULK_BAR_BTN}>
+                  <CopyPlus className="size-4" /> Duplikuj
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="center">
+                <DropdownMenuLabel>Skopiuj na przyszłość</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateInvoicesAction(selectedIdList(), 1))
+                  }
+                >
+                  Następny miesiąc
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateInvoicesAction(selectedIdList(), 3))
+                  }
+                >
+                  Kolejne 3 miesiące
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateInvoicesAction(selectedIdList(), 6))
+                  }
+                >
+                  Kolejne 6 miesięcy
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="mx-1 h-6 w-px bg-white/15" />
+
+            {/* Usuń */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => setBulkDeleteOpen(true)}
+              className={cn(
+                BULK_BAR_BTN,
+                "text-red-300 hover:bg-red-500/20 hover:text-red-200"
+              )}
+            >
+              <Trash2 className="size-4" /> Usuń
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Masowe: potwierdzenie usunięcia */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunąć zaznaczone pozycje?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Usuniesz {selectedCount}{" "}
+              {pluralPl(selectedCount, "pozycję", "pozycje", "pozycji")} przychodu.
+              Tej operacji nie można cofnąć.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                runBulk(() => bulkDeleteInvoicesAction(selectedIdList()));
+                setBulkDeleteOpen(false);
+              }}
+            >
+              Usuń
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Masowe: tagi oferty */}
+      <Dialog open={bulkTagsOpen} onOpenChange={setBulkTagsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ustaw tagi oferty</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="bulk-tags">Tagi (po przecinku)</Label>
+            <Input
+              id="bulk-tags"
+              value={bulkTags}
+              onChange={(e) => setBulkTags(e.target.value)}
+              placeholder="np. Leady, Call center"
+            />
+            <p className="text-xs text-muted-foreground">
+              Zastąpi tagi w {selectedCount}{" "}
+              {pluralPl(selectedCount, "zaznaczonej pozycji", "zaznaczonych pozycjach", "zaznaczonych pozycjach")}.
+              Puste pole = wyczyść tagi.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkTagsOpen(false)}>
+              Anuluj
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                runBulk(() => bulkSetInvoiceTagsAction(selectedIdList(), bulkTags));
+                setBulkTagsOpen(false);
+              }}
+            >
+              Zapisz
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Masowe: kwota netto */}
+      <Dialog open={bulkAmountOpen} onOpenChange={setBulkAmountOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ustaw kwotę netto</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="bulk-net">Kwota netto (zł)</Label>
+              <Input
+                id="bulk-net"
+                value={bulkNet}
+                onChange={(e) => setBulkNet(e.target.value)}
+                placeholder="12 000,00"
+                inputMode="decimal"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bulk-vat">Stawka VAT</Label>
+              <Select value={bulkVat} onValueChange={setBulkVat}>
+                <SelectTrigger id="bulk-vat">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {VAT_RATES.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {VAT_RATE_LABELS[r]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Ustawi tę samą kwotę netto (VAT/brutto policzone) w {selectedCount}{" "}
+            {pluralPl(selectedCount, "zaznaczonej pozycji", "zaznaczonych pozycjach", "zaznaczonych pozycjach")}.
+            Rozbicie paczek leadów zostanie usunięte.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAmountOpen(false)}>
+              Anuluj
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                runBulk(() =>
+                  bulkSetInvoiceAmountAction(selectedIdList(), bulkNet, bulkVat)
+                );
+                setBulkAmountOpen(false);
+              }}
+            >
+              Zapisz
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Sidebar: pozycje klienta → szczegóły pozycji ───────── */}
       <DetailSheet

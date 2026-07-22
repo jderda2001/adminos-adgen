@@ -205,7 +205,13 @@ model Cost {
   recurringCostId   String?
   recurringCost     RecurringCost? @relation(fields: [recurringCostId], references: [id], onDelete: SetNull)
   comments          CostComment[]
-  // partia importu CSV (dual-write z rachunkiem wyników) — do historii/cofania
+  // partia importu CSV kosztów (rejestr Kosztów) — do historii/cofania.
+  // Rejestr Kosztów i Rachunek wyników to DWIE OSOBNE bazy: import kosztów pisze
+  // WYŁĄCZNIE tutaj (nie do RwEntry), więc nie dubluje pozycji w RW.
+  costImportBatchId String?
+  costImportBatch   CostImportBatch? @relation(fields: [costImportBatchId], references: [id], onDelete: SetNull)
+  // DEPRECATED: dawny dual-write z RW. Zostaje tylko dla zgodności ze starymi
+  // danymi (po migracji żaden nowy koszt tu nie trafia).
   rwBatchId         String?
   rwBatch           RwImportBatch? @relation(fields: [rwBatchId], references: [id], onDelete: SetNull)
   createdAt         DateTime  @default(now())
@@ -215,6 +221,20 @@ model Cost {
   @@index([categoryId])
   @@index([paid])
   @@index([rwBatchId])
+  @@index([costImportBatchId])
+}
+
+// Partia importu CSV do REJESTRU KOSZTÓW. Świadomie odrębna od RwImportBatch
+// (Rachunek wyników) — dzięki temu import kosztów i import RW nigdy się nie
+// mieszają. Trzyma tylko metadane partii; dokumenty Cost linkują przez
+// costImportBatchId (usunięcie partii kasuje dokumenty tej partii).
+model CostImportBatch {
+  id        String   @id @default(cuid())
+  filename  String
+  rowCount  Int
+  createdAt DateTime @default(now())
+
+  costs Cost[]
 }
 
 // Komentarz do kosztu — historia z autorem (kto i kiedy). authorName to snapshot

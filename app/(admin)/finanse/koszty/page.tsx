@@ -55,7 +55,7 @@ export default async function CostsPage({
   // partii CSV (do edycji inline), ignorując filtr okresu i wyłączając auto-budżet
   const importId = first(raw.import);
   const importBatch = importId
-    ? await db.rwImportBatch.findUnique({
+    ? await db.costImportBatch.findUnique({
         where: { id: importId },
         select: { filename: true },
       })
@@ -120,7 +120,7 @@ export default async function CostsPage({
   const [costs, pendingCosts, categories, clients, suppliers, templates] =
     await Promise.all([
       db.cost.findMany({
-        where: importMode ? { rwBatchId: importId } : where,
+        where: importMode ? { costImportBatchId: importId } : where,
         include: {
           category: true,
           client: true,
@@ -245,19 +245,20 @@ export default async function CostsPage({
   const categoryOptions = categories.map((c) => ({ id: c.id, name: c.name }));
   const supplierNames = suppliers.map((s) => s.supplierName);
 
-  // Historia importów kosztów: partie KOSZT z liczbą podpiętych dokumentów
-  // (pokazujemy tylko te, które faktycznie dodały koszty do rejestru).
-  const batches = await db.rwImportBatch.findMany({
-    where: { kind: "KOSZT" },
+  // Historia importów kosztów: partie z rejestru Kosztów (CostImportBatch),
+  // z liczbą podpiętych dokumentów. Rejestr osobny od Rachunku wyników.
+  const batches = await db.costImportBatch.findMany({
     orderBy: { createdAt: "desc" },
     select: { id: true, filename: true, createdAt: true },
   });
   const batchCounts = await db.cost.groupBy({
-    by: ["rwBatchId"],
-    where: { rwBatchId: { in: batches.map((b) => b.id) } },
+    by: ["costImportBatchId"],
+    where: { costImportBatchId: { in: batches.map((b) => b.id) } },
     _count: { _all: true },
   });
-  const countByBatch = new Map(batchCounts.map((g) => [g.rwBatchId, g._count._all]));
+  const countByBatch = new Map(
+    batchCounts.map((g) => [g.costImportBatchId, g._count._all])
+  );
   const costImports: CostImportRowInfo[] = batches
     .map((b) => ({
       id: b.id,

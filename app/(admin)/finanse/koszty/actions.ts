@@ -848,18 +848,19 @@ export async function deleteRecurringCostAction(
 }
 
 // ── Import CSV kosztów (backfill historyczny) ────────────────────────
-// Każdy wiersz tworzy dokument Cost (rejestr operacyjny) ORAZ wpis RwEntry
-// (rok/miesiąc z daty) — dane widoczne i w Kosztach (Dashboard/Rentowność),
-// i w Rachunku wyników + Estymacjach. Kategoria z przeglądu to kategoria RW;
-// CostCategory tworzymy/dobieramy po tej samej nazwie (upsert), co ujednolica
-// taksonomię. Koszty historyczne oznaczamy jako opłacone.
+// Każdy wiersz tworzy WYŁĄCZNIE dokument Cost (rejestr Kosztów) w ramach partii
+// CostImportBatch — NIE pisze do Rachunku wyników (RwEntry). Rejestr Kosztów i
+// Rachunek wyników to dwie osobne bazy; import kosztów nie dubluje pozycji w RW.
+// Kategoria z przeglądu mapowana na CostCategory (upsert po nazwie). Koszty
+// historyczne oznaczamy jako opłacone. Dane trafiają do Kosztów/Dashboardu/
+// Rentowności/Estymacji (te czytają Cost), ale NIE do Rachunku wyników.
 
 export interface CostImportRow {
   dateISO: string; // "RRRR-MM-DD"
   year: number;
   month: number; // 1–12
   supplier: string;
-  category: string; // kategoria RW wybrana w przeglądzie
+  category: string; // kategoria kosztowa wybrana w przeglądzie
   netGr: number; // dodatnie
   grossGr: number; // dodatnie (brutto z pliku / z przeliczenia stawki)
   vatRate: string; // 23 | 8 | 5 | 0 | ZW
@@ -942,35 +943,12 @@ export async function commitCostImportAction(input: {
     catId.set(name, cat.id);
   }
 
-  // rok partii = dominujący wśród wierszy
-  const yearCounts = new Map<number, number>();
-  for (const p of prepared) yearCounts.set(p.year, (yearCounts.get(p.year) ?? 0) + 1);
-  const batchYear = [...yearCounts.entries()].sort((a, b) => b[1] - a[1])[0][0];
-
   await db.$transaction(async (tx) => {
-    const batch = await tx.rwImportBatch.create({
+    const batch = await tx.costImportBatch.create({
       data: {
         filename: (input.filename || "koszty.csv").slice(0, 200),
-        kind: "KOSZT",
-        year: batchYear,
         rowCount: prepared.length,
       },
-    });
-    await tx.rwEntry.createMany({
-      data: prepared.map((p) => ({
-        year: p.year,
-        month: p.month,
-        kind: "KOSZT",
-        category: p.rwCategory,
-        amountGr: -p.netGr,
-        grossGr: -p.grossGr,
-        vatRate: p.vatRate === "ZW" ? 0 : parseInt(p.vatRate, 10),
-        description: p.supplier,
-        bank: null,
-        note: `import kosztów ${p.dateISO}`,
-        source: "IMPORT",
-        batchId: batch.id,
-      })),
     });
     await tx.cost.createMany({
       data: prepared.map((p) => {
@@ -992,37 +970,33 @@ export async function commitCostImportAction(input: {
           approvedForPayment: true,
           needsConfirmation: false,
           note: "import CSV",
-          rwBatchId: batch.id,
+          costImportBatchId: batch.id,
         };
       }),
     });
   });
 
   revalidatePath(KOSZTY_PATH);
-  revalidatePath(RW_PATH);
   revalidatePath(ESTYMACJE_PATH);
   const years = [...new Set(prepared.map((p) => p.year))].sort((a, b) => a - b);
   return { ok: true, imported: prepared.length, years };
 }
 
 /**
- * Cofnięcie partii importu kosztów (dual-write): usuwa dokumenty Cost tej partii
- * ORAZ mirror-wpisy RwEntry i samą partię — oba rejestry wracają do stanu sprzed
- * importu. Bezpieczne dla starych partii bez podpiętych kosztów (usunie 0 Cost).
+ * Cofnięcie partii importu kosztów: usuwa dokumenty Cost tej partii oraz samą
+ * partię. Dotyczy WYŁĄCZNIE rejestru Kosztów — nie rusza Rachunku wyników.
  */
 export async function deleteCostImportBatchAction(batchId: string): Promise<ActionResult> {
   await requireAdmin();
-  const batch = await db.rwImportBatch.findUnique({ where: { id: batchId } });
+  const batch = await db.costImportBatch.findUnique({ where: { id: batchId } });
   if (!batch) return fail("Import nie istnieje");
 
   const [{ count: costCount }] = await db.$transaction([
-    db.cost.deleteMany({ where: { rwBatchId: batchId } }),
-    db.rwEntry.deleteMany({ where: { batchId } }),
-    db.rwImportBatch.delete({ where: { id: batchId } }),
+    db.cost.deleteMany({ where: { costImportBatchId: batchId } }),
+    db.costImportBatch.delete({ where: { id: batchId } }),
   ]);
 
   revalidatePath(KOSZTY_PATH);
-  revalidatePath(RW_PATH);
   revalidatePath(ESTYMACJE_PATH);
   revalidatePath("/platnosci");
   return ok(`Cofnięto import „${batch.filename}” (${costCount} kosztów)`);

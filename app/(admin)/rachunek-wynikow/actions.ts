@@ -627,20 +627,19 @@ export async function aiCategorizeAction(rows: RwAiRequestRow[]): Promise<RwAiRe
   }
 }
 
-/** Cofa import — usuwa partię wraz ze wszystkimi jej wpisami */
+/** Cofa import RW — usuwa partię wraz ze wszystkimi jej wpisami RwEntry.
+ * Dotyczy WYŁĄCZNIE Rachunku wyników — rejestr Kosztów jest osobną bazą i nie
+ * jest ruszany (import kosztów ma własne partie CostImportBatch). */
 export async function deleteRwBatchAction(batchId: string): Promise<ActionResult> {
   await requireAdmin();
   const batch = await db.rwImportBatch.findUnique({ where: { id: batchId } });
   if (!batch) return fail("Import nie istnieje");
 
   await db.$transaction([
-    // partie KOSZT to dual-write z rejestrem Kosztów — usuń też mirror-dokumenty Cost
-    db.cost.deleteMany({ where: { rwBatchId: batchId } }),
     db.rwEntry.deleteMany({ where: { batchId } }),
     db.rwImportBatch.delete({ where: { id: batchId } }),
   ]);
   revalidatePath(RW_PATH);
-  revalidatePath("/finanse/koszty");
   return ok(`Cofnięto import „${batch.filename}” (${batch.rowCount} wierszy)`);
 }
 
