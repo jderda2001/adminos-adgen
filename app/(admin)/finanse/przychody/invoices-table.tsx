@@ -14,6 +14,8 @@ import {
   BadgeCheck,
   ChevronRight,
   Download,
+  Mail,
+  MessageSquare,
   Paperclip,
   Pencil,
   Plus,
@@ -83,7 +85,8 @@ import {
   removeInvoiceAttachmentAction,
 } from "./actions";
 import { ReminderTimeline } from "./reminder-timeline";
-import type { ExistingReminder } from "@/lib/payment-reminders";
+import { sendReminderStepAction } from "./reminder-actions";
+import { buildReminderTimeline, type ExistingReminder } from "@/lib/payment-reminders";
 
 export interface InvoiceRow {
   id: string;
@@ -127,6 +130,10 @@ export interface RevenueKpis {
   count: number;
 }
 
+interface ReminderTarget {
+  invoiceId: string;
+  stepKey: string;
+}
 interface ClientGroup {
   clientId: string;
   clientName: string;
@@ -135,6 +142,11 @@ interface ClientGroup {
   grossGr: number;
   status: string; // najpilniejszy status w grupie (do plakietki wiersza)
   offerTags: string[]; // suma tagów wszystkich pozycji (bez duplikatów)
+  // szybkie przypomnienia z listy: pozycje z aktualnym krokiem SMS/e-mail do wysłania
+  smsTargets: ReminderTarget[];
+  emailTargets: ReminderTarget[];
+  clientHasPhone: boolean;
+  clientHasEmail: boolean;
 }
 
 const REVENUE_STATUS_LABELS: Record<string, string> = {
@@ -183,6 +195,27 @@ function waitedLabel(row: InvoiceRow): string {
   const days = waitedDays(row);
   if (days === null) return "—";
   return `${days} ${pluralPl(days, "dzień", "dni", "dni")}`;
+}
+
+/** Mały donut udziału w przychodach (arc = pct, tor = jasny). */
+function ShareDonut({ pct }: { pct: number }) {
+  const p = Math.max(0, Math.min(100, pct));
+  return (
+    <svg viewBox="0 0 36 36" className="size-5 shrink-0 text-muted-foreground/25" aria-hidden="true">
+      <circle cx="18" cy="18" r="15.915" fill="none" stroke="currentColor" strokeWidth="4" />
+      <circle
+        cx="18"
+        cy="18"
+        r="15.915"
+        fill="none"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeDasharray={`${p} ${100 - p}`}
+        strokeDashoffset="25"
+        style={{ stroke: "var(--primary)" }}
+      />
+    </svg>
+  );
 }
 
 function parseTags(raw: string | null): string[] {
@@ -342,6 +375,10 @@ export function InvoicesTable({
           grossGr: 0,
           status: "PAID",
           offerTags: [],
+          smsTargets: [],
+          emailTargets: [],
+          clientHasPhone: inv.clientHasPhone,
+          clientHasEmail: inv.clientHasEmail,
         };
         map.set(inv.clientId, g);
       }
@@ -350,6 +387,7 @@ export function InvoicesTable({
       g.grossGr += inv.grossGr;
     }
     const result = [...map.values()];
+    const today = new Date(todayIso);
     for (const g of result) {
       g.status = groupStatus(g.positions);
       const seen = new Set<string>();
@@ -357,9 +395,23 @@ export function InvoicesTable({
         for (const t of parseTags(p.offerTags))
           if (!seen.has(t)) seen.add(t);
       g.offerTags = [...seen];
+      // aktualny krok przypomnień per pozycja (tylko Wystawiona/Przeterminowana)
+      for (const p of g.positions) {
+        if (p.status !== "ISSUED" && p.status !== "OVERDUE") continue;
+        const cur = buildReminderTimeline(new Date(p.dueDate), today, p.reminders, {
+          paid: false,
+          enabled: p.remindersEnabled,
+        }).steps.find((s) => s.isCurrent);
+        if (!cur) continue;
+        for (const ch of cur.channels) {
+          if (!ch.actionable) continue;
+          if (ch.channel === "SMS") g.smsTargets.push({ invoiceId: p.id, stepKey: cur.key });
+          else if (ch.channel === "EMAIL") g.emailTargets.push({ invoiceId: p.id, stepKey: cur.key });
+        }
+      }
     }
     return result;
-  }, [invoices]);
+  }, [invoices, todayIso]);
 
   const openClient = groups.find((g) => g.clientId === openClientId) ?? null;
   const openPosition =
@@ -376,6 +428,27 @@ export function InvoicesTable({
       ),
     [invoices]
   );
+
+  // szybka wysyłka z listy: aktualny krok przypomnień dla wskazanych pozycji
+  function sendReminders(targets: ReminderTarget[], channel: "SMS" | "EMAIL") {
+    if (targets.length === 0) return;
+    startTransition(async () => {
+      let okN = 0;
+      let lastErr = "";
+      for (const t of targets) {
+        const r = await sendReminderStepAction({
+          invoiceId: t.invoiceId,
+          stepKey: t.stepKey,
+          channel,
+        });
+        if (r.ok) okN += 1;
+        else lastErr = r.error;
+      }
+      const label = channel === "SMS" ? "SMS" : "e-mail";
+      if (okN === targets.length) toast.success(`Przypomnienie wysłane (${okN} × ${label})`);
+      else toast.error(lastErr || `Wysłano ${okN}/${targets.length}`);
+    });
+  }
 
   function runAction(action: () => Promise<ActionResult>) {
     startTransition(async () => {
@@ -490,16 +563,60 @@ export function InvoicesTable({
         cell: ({ row }) => {
           const pct = totals.netGr > 0 ? (row.original.netGr / totals.netGr) * 100 : 0;
           return (
-            <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center justify-end gap-2">
               <span className="font-medium tabular-nums">
                 {pct.toFixed(1).replace(".", ",")}%
               </span>
-              <span className="block h-1 w-14 overflow-hidden rounded-full bg-muted">
-                <span
-                  className="block h-full rounded-full bg-primary/60"
-                  style={{ width: `${Math.min(100, pct)}%` }}
-                />
-              </span>
+              <ShareDonut pct={pct} />
+            </div>
+          );
+        },
+      },
+      {
+        id: "remind",
+        header: () => <div className="text-right">Przypomnij</div>,
+        enableSorting: false,
+        meta: { align: "right" },
+        cell: ({ row }) => {
+          const g = row.original;
+          if (g.smsTargets.length === 0 && g.emailTargets.length === 0) {
+            return <div className="text-right text-muted-foreground/40">—</div>;
+          }
+          return (
+            <div
+              className="flex justify-end gap-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {g.smsTargets.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={pending || !g.clientHasPhone}
+                  title={
+                    g.clientHasPhone
+                      ? `Wyślij SMS (${g.smsTargets.length})`
+                      : "Brak numeru telefonu klienta"
+                  }
+                  onClick={() => sendReminders(g.smsTargets, "SMS")}
+                >
+                  <MessageSquare className="size-4" />
+                </Button>
+              )}
+              {g.emailTargets.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  disabled={pending || !g.clientHasEmail}
+                  title={
+                    g.clientHasEmail
+                      ? `Wyślij e-mail (${g.emailTargets.length})`
+                      : "Brak adresu e-mail klienta"
+                  }
+                  onClick={() => sendReminders(g.emailTargets, "EMAIL")}
+                >
+                  <Mail className="size-4" />
+                </Button>
+              )}
             </div>
           );
         },
@@ -515,7 +632,7 @@ export function InvoicesTable({
         ),
       },
     ],
-    [totals.netGr]
+    [totals.netGr, pending]
   );
 
   const newInvoiceTrigger = (
@@ -622,6 +739,7 @@ export function InvoicesTable({
             </TableCell>
             <TableCell />
             <TableCell className="text-right font-medium tabular-nums">100%</TableCell>
+            <TableCell />
             <TableCell />
           </>
         }

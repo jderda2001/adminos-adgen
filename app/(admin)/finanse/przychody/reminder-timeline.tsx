@@ -1,28 +1,25 @@
 "use client";
 
-// Oś czasu sekwencji przypomnień o płatności w szczegółach pozycji przychodu.
-// Pokazuje 5 kroków (SMS/e-mail/telefon) z terminami i statusem; dla aktualnego
-// kroku pozwala wysłać (SMS/e-mail) lub oznaczyć telefon jako wykonany. Wysyłka
-// zależy od trybu (symulacja/na żywo) — logika po stronie serwera (notify).
+// Oś czasu przypomnień o płatności w szczegółach pozycji — pionowy „rail" z
+// kropkami statusu. Jeden wiersz na krok; akcje (Wyślij / Oznacz wykonany) tylko
+// przy kroku AKTUALNYM, treść wiadomości schowana pod przełącznikiem „Podgląd".
 
 import { useState, useTransition } from "react";
-import { Mail, MessageSquare, Phone } from "lucide-react";
+import { Mail, MessageSquare, Phone, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { StatusBadge, type StatusTone } from "@/components/status-badge";
 import { formatDate } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import type { ActionResult } from "@/lib/action-result";
 import {
   buildReminderTimeline,
   renderReminderMessage,
   CHANNEL_LABELS,
-  REMINDER_STATUS_LABELS,
   type ReminderChannel,
-  type ReminderStatus,
-  type DisplayStatus,
   type ExistingReminder,
+  type TimelineStep,
 } from "@/lib/payment-reminders";
 import {
   markPhoneStepDoneAction,
@@ -36,29 +33,25 @@ const CHANNEL_ICON: Record<ReminderChannel, typeof Mail> = {
   PHONE: Phone,
 };
 
-function toneFor(s: DisplayStatus): StatusTone {
-  switch (s) {
-    case "SENT":
-    case "DONE":
-      return "green";
-    case "SIMULATED":
-      return "blue";
-    case "QUEUED":
-      return "amber";
-    case "FAILED":
-      return "red";
-    default:
-      return "neutral"; // SKIPPED, PENDING
-  }
+type StepState = "done" | "current" | "skipped" | "pending";
+function stepState(step: TimelineStep): StepState {
+  if (step.isCurrent) return "current";
+  if (step.channels.some((c) => ["SENT", "SIMULATED", "DONE"].includes(c.status))) return "done";
+  if (step.channels.some((c) => c.status === "SKIPPED")) return "skipped";
+  return "pending";
 }
-function statusLabel(s: DisplayStatus): string {
-  return s === "PENDING" ? "Zaplanowane" : REMINDER_STATUS_LABELS[s as ReminderStatus];
-}
+
+const DOT: Record<StepState, string> = {
+  done: "bg-emerald-500",
+  current: "bg-primary ring-4 ring-primary/15",
+  skipped: "bg-muted-foreground/30",
+  pending: "border border-border bg-card",
+};
 
 export interface ReminderTimelineProps {
   invoiceId: string;
   dueDateIso: string;
-  grossGr: number; // kwota brutto do zapłaty (podgląd treści)
+  grossGr: number;
   status: string; // status faktury (PAID → sekwencja wstrzymana)
   remindersEnabled: boolean;
   reminders: ExistingReminder[];
@@ -79,8 +72,9 @@ export function ReminderTimeline({
   clientHasPhone,
 }: ReminderTimelineProps) {
   const [pending, startTransition] = useTransition();
-  const [noteFor, setNoteFor] = useState<string | null>(null); // stepKey telefonu w edycji
+  const [noteOpen, setNoteOpen] = useState(false); // edytor notatki telefonu (krok aktualny)
   const [noteText, setNoteText] = useState("");
+  const [showPreview, setShowPreview] = useState(false);
 
   const msgCtx = { amountGr: grossGr, dueDate: new Date(dueDateIso) };
   const paid = status === "PAID";
@@ -97,180 +91,218 @@ export function ReminderTimeline({
     });
   }
 
+  function missing(channel: ReminderChannel) {
+    return (channel === "SMS" && !clientHasPhone) || (channel === "EMAIL" && !clientHasEmail);
+  }
+
   return (
     <div className="mt-4 border-t pt-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
+      <div className="mb-4 flex items-center justify-between gap-2">
         <h4 className="text-sm font-semibold">Przypomnienia o płatności</h4>
         <label className="flex items-center gap-2 text-xs text-muted-foreground">
           {remindersEnabled ? "Automatyzacja wł." : "Wstrzymana"}
           <Switch
             checked={remindersEnabled}
             disabled={pending || paid}
-            onCheckedChange={(v) =>
-              run(() => toggleInvoiceRemindersAction(invoiceId, v))
-            }
+            onCheckedChange={(v) => run(() => toggleInvoiceRemindersAction(invoiceId, v))}
           />
         </label>
       </div>
 
       {paid && (
-        <div className="mb-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-300">
-          Faktura opłacona — automatyzacja przypomnień wstrzymana.
+        <div className="mb-4 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+          Faktura opłacona — automatyzacja wstrzymana.
         </div>
       )}
 
-      <ol className="space-y-3">
-        {tl.steps.map((step) => (
-          <li
-            key={step.key}
-            className={
-              "rounded-xl border p-3 " +
-              (step.isCurrent
-                ? "border-primary/40 bg-primary/5"
-                : "border-border/60 bg-card")
-            }
-          >
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-sm font-medium">{step.label}</span>
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-                {formatDate(new Date(step.dateIso))}
-              </span>
-            </div>
+      <ol>
+        {tl.steps.map((step, i) => {
+          const state = stepState(step);
+          const last = i === tl.steps.length - 1;
+          return (
+            <li key={step.key} className="relative flex gap-3">
+              {/* rail: kropka + linia */}
+              <div className="flex flex-col items-center pt-1">
+                <span className={cn("size-2.5 shrink-0 rounded-full", DOT[state])} />
+                {!last && <span className="mt-1 w-px flex-1 bg-border" />}
+              </div>
 
-            <div className="mt-2 space-y-2">
-              {step.channels.map((ch) => {
-                const Icon = CHANNEL_ICON[ch.channel];
-                const preview =
-                  ch.actionable && ch.channel !== "PHONE"
-                    ? renderReminderMessage(step.key, ch.channel, { ctx: msgCtx })
-                    : null;
-                const phoneInstruction =
-                  ch.actionable && ch.channel === "PHONE"
-                    ? renderReminderMessage(step.key, "PHONE", { ctx: msgCtx }).body
-                    : null;
-                const missingContact =
-                  (ch.channel === "SMS" && !clientHasPhone) ||
-                  (ch.channel === "EMAIL" && !clientHasEmail);
-                return (
-                  <div key={ch.channel} className="rounded-lg bg-muted/40 px-2.5 py-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Icon className="size-3.5 text-muted-foreground" />
-                      <span className="text-xs font-medium">{CHANNEL_LABELS[ch.channel]}</span>
-                      <StatusBadge tone={toneFor(ch.status)} className="text-[10px]">
-                        {statusLabel(ch.status)}
-                      </StatusBadge>
-                      {ch.sentAt && (
-                        <span className="text-[11px] text-muted-foreground">
-                          {formatDate(new Date(ch.sentAt))}
-                          {ch.actedByName ? ` · ${ch.actedByName}` : ""}
-                        </span>
-                      )}
-                      {ch.actionable && ch.channel !== "PHONE" && (
-                        <Button
-                          size="sm"
-                          className="ml-auto h-7"
-                          disabled={pending || missingContact}
-                          title={missingContact ? "Uzupełnij dane kontaktowe klienta" : undefined}
-                          onClick={() =>
-                            run(() =>
-                              sendReminderStepAction({
-                                invoiceId,
-                                stepKey: step.key,
-                                channel: ch.channel,
-                              })
-                            )
-                          }
-                        >
-                          Wyślij
-                        </Button>
-                      )}
-                      {ch.actionable && ch.channel === "PHONE" && noteFor !== step.key && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-auto h-7"
-                          disabled={pending}
-                          onClick={() => {
-                            setNoteFor(step.key);
-                            setNoteText("");
-                          }}
-                        >
-                          Oznacz wykonany
-                        </Button>
-                      )}
-                    </div>
-
-                    {missingContact && ch.actionable && (
-                      <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
-                        Brak {ch.channel === "SMS" ? "numeru telefonu" : "adresu e-mail"} klienta.
-                      </p>
+              <div className={cn("flex-1", last ? "pb-0" : "pb-5")}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span
+                    className={cn(
+                      "text-sm",
+                      step.isCurrent ? "font-semibold" : "font-medium text-muted-foreground"
                     )}
-                    {preview && (
-                      <div className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-                        {preview.subject && (
-                          <div className="font-medium text-foreground/70">{preview.subject}</div>
-                        )}
-                        <div className="whitespace-pre-line">{preview.body}</div>
+                  >
+                    {step.label}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                    {formatDate(new Date(step.dateIso))}
+                  </span>
+                </div>
+
+                {/* kanały */}
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {step.channels.map((ch) => {
+                    const Icon = CHANNEL_ICON[ch.channel];
+                    const acted = ["SENT", "SIMULATED", "DONE"].includes(ch.status);
+                    // krok aktualny → akcja
+                    if (step.isCurrent && ch.actionable) {
+                      if (ch.channel === "PHONE") {
+                        return (
+                          <Button
+                            key={ch.channel}
+                            size="xs"
+                            variant="outline"
+                            disabled={pending || noteOpen}
+                            onClick={() => {
+                              setNoteOpen(true);
+                              setNoteText("");
+                            }}
+                          >
+                            <Phone data-icon="inline-start" /> Oznacz telefon
+                          </Button>
+                        );
+                      }
+                      return (
+                        <span key={ch.channel} className="inline-flex flex-col">
+                          <Button
+                            size="xs"
+                            disabled={pending || missing(ch.channel)}
+                            title={missing(ch.channel) ? "Uzupełnij dane kontaktowe klienta" : undefined}
+                            onClick={() =>
+                              run(() =>
+                                sendReminderStepAction({ invoiceId, stepKey: step.key, channel: ch.channel })
+                              )
+                            }
+                          >
+                            <Icon data-icon="inline-start" /> Wyślij {CHANNEL_LABELS[ch.channel]}
+                          </Button>
+                          {missing(ch.channel) && (
+                            <span className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+                              brak {ch.channel === "SMS" ? "telefonu" : "e-maila"}
+                            </span>
+                          )}
+                        </span>
+                      );
+                    }
+                    // wysłane/wykonane → zielony ptaszek
+                    if (acted) {
+                      return (
+                        <span key={ch.channel} className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                          <Check className="size-3.5" />
+                          {CHANNEL_LABELS[ch.channel]}
+                          {ch.status === "SIMULATED" && " (symulacja)"}
+                          {ch.sentAt && (
+                            <span className="text-muted-foreground"> · {formatDate(new Date(ch.sentAt))}</span>
+                          )}
+                        </span>
+                      );
+                    }
+                    // pominięte / zaplanowane → wyszarzone
+                    return (
+                      <span
+                        key={ch.channel}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground/70"
+                      >
+                        <Icon className="size-3.5" />
+                        {CHANNEL_LABELS[ch.channel]}
+                      </span>
+                    );
+                  })}
+                  {!step.isCurrent && state === "pending" && (
+                    <span className="text-xs text-muted-foreground/60">· zaplanowane</span>
+                  )}
+                  {!step.isCurrent && state === "skipped" && (
+                    <span className="text-xs text-muted-foreground/60">· pominięte</span>
+                  )}
+                </div>
+
+                {/* notatka z wykonanego telefonu */}
+                {step.channels.find((c) => c.channel === "PHONE")?.note && !step.isCurrent && (
+                  <p className="mt-1 whitespace-pre-line text-[11px] leading-snug text-muted-foreground">
+                    Notatka: {step.channels.find((c) => c.channel === "PHONE")?.note}
+                  </p>
+                )}
+
+                {/* AKTUALNY krok: podgląd treści (chowany) + edytor notatki telefonu */}
+                {step.isCurrent && (
+                  <div className="mt-2 space-y-2">
+                    {!noteOpen &&
+                      step.channels.some((c) => c.actionable && c.channel !== "PHONE") && (
+                        <button
+                          type="button"
+                          onClick={() => setShowPreview((v) => !v)}
+                          className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                        >
+                          {showPreview ? "Ukryj treść" : "Podgląd treści"}
+                        </button>
+                      )}
+                    {showPreview && !noteOpen && (
+                      <div className="space-y-2 rounded-lg bg-muted/40 p-2.5">
+                        {step.channels
+                          .filter((c) => c.channel !== "PHONE")
+                          .map((c) => {
+                            const m = renderReminderMessage(step.key, c.channel, { ctx: msgCtx });
+                            return (
+                              <div key={c.channel} className="text-[11px] leading-snug">
+                                <div className="mb-0.5 font-medium text-muted-foreground">
+                                  {CHANNEL_LABELS[c.channel]}
+                                  {m.subject ? ` — ${m.subject}` : ""}
+                                </div>
+                                <div className="whitespace-pre-line text-foreground/80">{m.body}</div>
+                              </div>
+                            );
+                          })}
                       </div>
                     )}
-                    {phoneInstruction && noteFor !== step.key && (
-                      <p className="mt-1.5 whitespace-pre-line text-[11px] leading-snug text-muted-foreground">
-                        {phoneInstruction}
+                    {/* instrukcja telefonu (gdy krok telefoniczny) */}
+                    {step.isPhone && !noteOpen && (
+                      <p className="whitespace-pre-line text-[11px] leading-snug text-muted-foreground">
+                        {renderReminderMessage(step.key, "PHONE", { ctx: msgCtx }).body}
                       </p>
                     )}
-                    {ch.note && !ch.actionable && (
-                      <p className="mt-1 whitespace-pre-line text-[11px] leading-snug text-muted-foreground">
-                        {ch.channel === "PHONE" ? "Notatka: " : ""}
-                        {ch.note}
-                      </p>
+                    {noteOpen && (
+                      <div className="space-y-2">
+                        <Textarea
+                          value={noteText}
+                          onChange={(e) => setNoteText(e.target.value)}
+                          placeholder="Notatka z rozmowy (opcjonalna): ustalony termin, deklaracje klienta…"
+                          rows={3}
+                          className="text-xs"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="h-7"
+                            disabled={pending}
+                            onClick={() =>
+                              run(async () => {
+                                const r = await markPhoneStepDoneAction({
+                                  invoiceId,
+                                  stepKey: step.key,
+                                  note: noteText,
+                                });
+                                if (r.ok) setNoteOpen(false);
+                                return r;
+                              })
+                            }
+                          >
+                            Zapisz
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7" onClick={() => setNoteOpen(false)}>
+                            Anuluj
+                          </Button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                );
-              })}
-            </div>
-
-            {/* edytor notatki telefonu */}
-            {noteFor === step.key && (
-              <div className="mt-2 space-y-2">
-                <Textarea
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Notatka z rozmowy (opcjonalna): ustalony termin, deklaracje klienta…"
-                  rows={3}
-                  className="text-xs"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    className="h-7"
-                    disabled={pending}
-                    onClick={() =>
-                      run(async () => {
-                        const r = await markPhoneStepDoneAction({
-                          invoiceId,
-                          stepKey: step.key,
-                          note: noteText,
-                        });
-                        if (r.ok) setNoteFor(null);
-                        return r;
-                      })
-                    }
-                  >
-                    Zapisz
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7"
-                    onClick={() => setNoteFor(null)}
-                  >
-                    Anuluj
-                  </Button>
-                </div>
+                )}
               </div>
-            )}
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ol>
     </div>
   );
