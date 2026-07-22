@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/searchable-select";
 import {
   DEFAULT_OFFER_TAGS,
   LEAD_TAG_PREFIX,
@@ -73,6 +74,7 @@ export function InvoiceFormDialog({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  const [clientId, setClientId] = useState("");
   const [net, setNet] = useState("");
   const [vatRate, setVatRate] = useState<VatRate>("23");
   const [tags, setTags] = useState<string[]>([]);
@@ -93,6 +95,7 @@ export function InvoiceFormDialog({
     : dateToInput(new Date(today.getTime() + 14 * 86_400_000));
 
   function resetFromInvoice() {
+    setClientId(invoice?.clientId ?? defaultClientId ?? "");
     setNet(invoice ? formatAmount(invoice.netGr) : "");
     setVatRate(invoice && isVatRate(invoice.vatRate) ? invoice.vatRate : "23");
     setTags(parseTags(invoice?.offerTags));
@@ -252,18 +255,14 @@ export function InvoiceFormDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label htmlFor="clientId">Klient *</Label>
-              <Select name="clientId" defaultValue={invoice?.clientId ?? defaultClientId}>
-                <SelectTrigger id="clientId" className="w-full">
-                  <SelectValue placeholder="Wybierz klienta" />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                id="clientId"
+                name="clientId"
+                value={clientId}
+                onChange={setClientId}
+                options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                placeholder="Wybierz klienta"
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="label">Opis pozycji</Label>

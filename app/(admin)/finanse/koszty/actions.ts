@@ -7,7 +7,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { fail, ok, type ActionResult } from "@/lib/action-result";
-import { computeVatFromNet } from "@/lib/calc";
+import { computeVatFromNet, computeVatFromGross } from "@/lib/calc";
 import { isValidNrb, normalizeAccount } from "@/lib/elixir";
 import { dateFromInput, parseMoneyToGr, todayUTC } from "@/lib/format";
 import { monthKey } from "@/lib/periods";
@@ -30,7 +30,9 @@ const costSchema = z.object({
   docNumber: z.string().trim().optional().default(""),
   docDate: z.string().trim().min(1, "Podaj datę dokumentu"),
   dueDate: z.string().trim().optional(),
-  net: z.string().trim().min(1, "Podaj kwotę netto"),
+  net: z.string().trim().optional().default(""), // kompatybilność wstecz
+  amount: z.string().trim().optional().default(""), // kwota (netto LUB brutto wg amountMode)
+  amountMode: z.string().trim().optional().default("NET"), // NET | GROSS
   vatRate: z.string().trim().min(1, "Wybierz stawkę VAT"),
   categoryId: z.string().trim().min(1, "Wybierz kategorię"),
   assignment: z.string().trim().min(1, "Wybierz przypisanie kosztu"),
@@ -69,7 +71,9 @@ function parseCostForm(
     docNumber: formData.get("docNumber") ?? "",
     docDate: formData.get("docDate"),
     dueDate: formData.get("dueDate") ?? "",
-    net: formData.get("net"),
+    net: formData.get("net") ?? "",
+    amount: formData.get("amount") ?? "",
+    amountMode: formData.get("amountMode") ?? "NET",
     vatRate: formData.get("vatRate"),
     categoryId: formData.get("categoryId"),
     assignment: formData.get("assignment"),
@@ -104,15 +108,20 @@ function parseCostForm(
     if (!dueDate) return { success: false, error: "Podaj poprawny termin płatności" };
   }
 
-  const netGr = parseMoneyToGr(d.net);
-  if (netGr === null || netGr < 0) {
-    return { success: false, error: "Podaj poprawną kwotę netto, np. 1 234,56" };
+  // kwota może być podana jako NETTO albo BRUTTO (np. z wyciągu) — VAT/netto
+  // przeliczamy w obie strony wg amountMode. `net` = fallback dla starych wywołań.
+  const amountStr = (d.amount || d.net).trim();
+  const amountGr = parseMoneyToGr(amountStr);
+  if (amountGr === null || amountGr < 0) {
+    return { success: false, error: "Podaj poprawną kwotę, np. 1 234,56" };
   }
-
   if (!isVatRate(d.vatRate)) {
     return { success: false, error: "Wybierz stawkę VAT" };
   }
-  const { vatGr, grossGr } = computeVatFromNet(netGr, d.vatRate);
+  const { netGr, vatGr, grossGr } =
+    d.amountMode === "GROSS"
+      ? computeVatFromGross(amountGr, d.vatRate)
+      : computeVatFromNet(amountGr, d.vatRate);
 
   const clientId = d.assignment === "OGOLNY" ? null : d.assignment;
 

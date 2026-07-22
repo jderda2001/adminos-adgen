@@ -43,6 +43,13 @@ export function computeVatFromNet(netGr: number, vatRate: VatRate): Amounts {
   return { netGr, vatGr, grossGr: netGr + vatGr };
 }
 
+/** VAT i netto od kwoty BRUTTO (np. z wyciągu bankowego). netto = zaokr(brutto /
+ * (1 + stawka)); VAT = brutto − netto — dzięki temu netto + VAT = brutto co do grosza. */
+export function computeVatFromGross(grossGr: number, vatRate: VatRate): Amounts {
+  const netGr = Math.round(grossGr / (1 + VAT_RATE_FRACTIONS[vatRate]));
+  return { netGr, vatGr: grossGr - netGr, grossGr };
+}
+
 /** Suma pozycji faktury */
 export function sumAmounts(items: Amounts[]): Amounts {
   return items.reduce(

@@ -24,7 +24,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { computeVatFromNet } from "@/lib/calc";
+import { computeVatFromNet, computeVatFromGross } from "@/lib/calc";
+import { cn } from "@/lib/utils";
+import { SearchableSelect } from "@/components/searchable-select";
 import {
   dateToInput,
   formatAmount,
@@ -61,23 +63,32 @@ export function CostFormDialog({
   const [pending, startTransition] = useTransition();
 
   // pola sterowane — potrzebne do podglądu VAT/brutto i pól warunkowych
-  const [net, setNet] = useState("");
+  const [amount, setAmount] = useState(""); // kwota wpisana (netto lub brutto)
+  const [amountMode, setAmountMode] = useState<"NET" | "GROSS">("NET");
   const [vatRate, setVatRate] = useState<VatRate>("23");
   const [paid, setPaid] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
+  const [assignment, setAssignment] = useState(GENERAL_VALUE);
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) {
-      setNet(cost ? formatAmount(cost.netGr) : "");
+      setAmount(cost ? formatAmount(cost.netGr) : "");
+      setAmountMode("NET"); // edycja pokazuje kwotę netto
       setVatRate(cost && isVatRate(cost.vatRate) ? cost.vatRate : "23");
       setPaid(cost?.paid ?? false);
       setIsRecurring(false);
+      setAssignment(cost?.clientId ?? GENERAL_VALUE);
     }
     setOpen(nextOpen);
   }
 
-  const netGr = parseMoneyToGr(net);
-  const amounts = netGr !== null ? computeVatFromNet(netGr, vatRate) : null;
+  const amountGr = parseMoneyToGr(amount);
+  const amounts =
+    amountGr === null
+      ? null
+      : amountMode === "GROSS"
+        ? computeVatFromGross(amountGr, vatRate)
+        : computeVatFromNet(amountGr, vatRate);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -146,16 +157,39 @@ export function CostFormDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label htmlFor="net">Kwota netto (zł) *</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="amount">
+                  Kwota {amountMode === "GROSS" ? "brutto" : "netto"} (zł) *
+                </Label>
+                {/* przełącznik: wpisujemy netto czy brutto (np. z wyciągu) */}
+                <div className="inline-flex overflow-hidden rounded-md border text-xs">
+                  {(["NET", "GROSS"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setAmountMode(m)}
+                      className={cn(
+                        "px-2 py-0.5 transition-colors",
+                        amountMode === m
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-muted"
+                      )}
+                    >
+                      {m === "NET" ? "Netto" : "Brutto"}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Input
-                id="net"
-                name="net"
+                id="amount"
+                name="amount"
                 inputMode="decimal"
                 required
                 placeholder="1 234,56"
-                value={net}
-                onChange={(e) => setNet(e.target.value)}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
               />
+              <input type="hidden" name="amountMode" value={amountMode} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="vatRate">Stawka VAT *</Label>
@@ -177,10 +211,10 @@ export function CostFormDialog({
               </Select>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground tabular-nums">
             {amounts
-              ? `VAT: ${formatMoney(amounts.vatGr)} · Brutto: ${formatMoney(amounts.grossGr)}`
-              : "Podaj kwotę netto, aby zobaczyć VAT i brutto"}
+              ? `Netto: ${formatMoney(amounts.netGr)} · VAT: ${formatMoney(amounts.vatGr)} · Brutto: ${formatMoney(amounts.grossGr)}`
+              : "Podaj kwotę, aby zobaczyć rozbicie netto / VAT / brutto"}
           </p>
 
           <div className="grid grid-cols-2 gap-3">
@@ -201,22 +235,16 @@ export function CostFormDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="assignment">Przypisanie *</Label>
-              <Select
+              <SearchableSelect
+                id="assignment"
                 name="assignment"
-                defaultValue={cost?.clientId ?? GENERAL_VALUE}
-              >
-                <SelectTrigger id="assignment" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={GENERAL_VALUE}>Koszt ogólny</SelectItem>
-                  {clients.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                value={assignment}
+                onChange={setAssignment}
+                options={[
+                  { value: GENERAL_VALUE, label: "Koszt ogólny" },
+                  ...clients.map((c) => ({ value: c.id, label: c.name })),
+                ]}
+              />
             </div>
           </div>
 

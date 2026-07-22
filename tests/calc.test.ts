@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeItemAmounts,
   computeVatFromNet,
+  computeVatFromGross,
   sumAmounts,
   effectiveRateGr,
   laborCostGr,
@@ -118,6 +119,34 @@ describe("computeVatFromNet", () => {
 
   it("zaokrągla VAT do grosza: 333 gr × 23% → 77 gr (round z 76,59)", () => {
     expect(computeVatFromNet(333, "23").vatGr).toBe(77);
+  });
+});
+
+// ── computeVatFromGross (kwota z wyciągu: brutto → netto/VAT) ─────────
+
+describe("computeVatFromGross", () => {
+  it("23%: 12 300 zł → netto 10 000, VAT 2 300", () => {
+    expect(computeVatFromGross(1_230_000, "23")).toEqual({
+      netGr: 1_000_000,
+      vatGr: 230_000,
+      grossGr: 1_230_000,
+    });
+  });
+
+  it("netto + VAT = brutto co do grosza (nieokrągłe brutto)", () => {
+    const a = computeVatFromGross(100_00, "23"); // 100,00 zł brutto
+    expect(a.netGr + a.vatGr).toBe(a.grossGr);
+    expect(a.grossGr).toBe(10_000);
+  });
+
+  it("0% / ZW: netto = brutto, VAT 0", () => {
+    expect(computeVatFromGross(10_000, "0")).toEqual({ netGr: 10_000, vatGr: 0, grossGr: 10_000 });
+    expect(computeVatFromGross(10_000, "ZW")).toEqual({ netGr: 10_000, vatGr: 0, grossGr: 10_000 });
+  });
+
+  it("odwrotność computeVatFromNet dla okrągłego netto", () => {
+    const gross = computeVatFromNet(500_000, "23").grossGr; // 615 000
+    expect(computeVatFromGross(gross, "23").netGr).toBe(500_000);
   });
 });
 
