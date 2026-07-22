@@ -12,6 +12,7 @@ import {
   CLIENT_STATUSES,
   CONTRACT_TYPES,
   CONTRACT_TYPE_NOTICE_MONTHS,
+  CONTRACT_TYPE_FIXED_MONTHS,
   type ContractType,
 } from "@/lib/types";
 
@@ -129,6 +130,14 @@ function parseClientForm(
   if (d.endDate) {
     endDate = dateFromInput(d.endDate);
     if (!endDate) return { success: false, error: "Podaj poprawną datę zakończenia" };
+  }
+  // umowa terminowa (np. 3 msc bez przedłużenia): jeśli nie podano daty końca,
+  // wyliczamy ją z daty startu — ostatni dzień N-tego miesiąca współpracy.
+  const fixedMonths = CONTRACT_TYPE_FIXED_MONTHS[d.contractType as ContractType];
+  if (fixedMonths && startDate && !endDate) {
+    endDate = new Date(
+      Date.UTC(startDate.getUTCFullYear(), startDate.getUTCMonth() + fixedMonths, 0)
+    );
   }
   if (startDate && endDate && endDate < startDate) {
     return { success: false, error: "Data zakończenia nie może być przed datą startu" };

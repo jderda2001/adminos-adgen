@@ -53,26 +53,38 @@ export const CLIENT_STATUS_LABELS: Record<ClientStatus, string> = {
 // co miesiąc (MRR) czy jest jednorazowy (tylko miesiąc startu) w Estymacjach.
 export const CONTRACT_TYPES = [
   "INDEFINITE_NOTICE",
+  "FIXED_3M",
   "ONE_OFF_MONTH",
   "ONE_OFF_PROJECT",
 ] as const;
 export type ContractType = (typeof CONTRACT_TYPES)[number];
 export const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
   INDEFINITE_NOTICE: "Czas nieokreślony (1-mies. wypowiedzenie)",
+  FIXED_3M: "Umowa na 3 msc. bez przedłużenia",
   ONE_OFF_MONTH: "Umowa jednorazowa (1 miesiąc)",
   ONE_OFF_PROJECT: "Projekt jednorazowy",
 };
 /** okres wypowiedzenia w miesiącach wg typu umowy */
 export const CONTRACT_TYPE_NOTICE_MONTHS: Record<ContractType, number> = {
   INDEFINITE_NOTICE: 1,
+  FIXED_3M: 0, // kończy się z upływem terminu, bez wypowiedzenia
   ONE_OFF_MONTH: 0,
   ONE_OFF_PROJECT: 0,
 };
 /** czy przychód jest jednorazowy (bez powtarzalnego MRR w prognozie) */
 export const CONTRACT_TYPE_ONE_OFF: Record<ContractType, boolean> = {
   INDEFINITE_NOTICE: false,
+  FIXED_3M: false, // powtarzalny MRR, ale tylko przez czas trwania (patrz FIXED_MONTHS)
   ONE_OFF_MONTH: true,
   ONE_OFF_PROJECT: true,
+};
+/** czas trwania umowy terminowej w miesiącach (null = nieterminowa/jednorazowa);
+ * endDate wylicza się z daty startu, umowa nie przedłuża się automatycznie */
+export const CONTRACT_TYPE_FIXED_MONTHS: Record<ContractType, number | null> = {
+  INDEFINITE_NOTICE: null,
+  FIXED_3M: 3,
+  ONE_OFF_MONTH: null,
+  ONE_OFF_PROJECT: null,
 };
 
 // Rozliczenie: z góry (faktura za bieżący miesiąc) / z dołu (za miniony miesiąc)

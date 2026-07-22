@@ -148,7 +148,9 @@ export default async function RevenuesPage({
     const ongoing = await db.client.findMany({
       where: {
         status: "ACTIVE",
-        contractType: "INDEFINITE_NOTICE",
+        // umowy w toku: czas nieokreślony ORAZ terminowe (np. 3 msc) — te drugie
+        // estymują się tylko do endDate (cap w filtrze endOk niżej)
+        contractType: { in: ["INDEFINITE_NOTICE", "FIXED_3M"] },
         ...(clientFilter ? { id: clientFilter } : {}),
       },
       select: { id: true, name: true, email: true, phone: true, startDate: true, endDate: true },

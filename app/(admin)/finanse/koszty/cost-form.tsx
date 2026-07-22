@@ -35,7 +35,11 @@ import {
   todayUTC,
 } from "@/lib/format";
 import { VAT_RATES, VAT_RATE_LABELS, isVatRate, type VatRate } from "@/lib/types";
-import { createCostAction, updateCostAction } from "./actions";
+import {
+  createCostAction,
+  updateCostAction,
+  updateRecurringCopyAmountAction,
+} from "./actions";
 import type { CostRow } from "./costs-table";
 
 export interface SelectOption {
@@ -69,6 +73,7 @@ export function CostFormDialog({
   const [paid, setPaid] = useState(false);
   const [isRecurring, setIsRecurring] = useState(false);
   const [assignment, setAssignment] = useState(GENERAL_VALUE);
+  const [applyToFuture, setApplyToFuture] = useState(false); // zmiana kwoty w kolejnych miesiącach
 
   function handleOpenChange(nextOpen: boolean) {
     if (nextOpen) {
@@ -78,6 +83,7 @@ export function CostFormDialog({
       setPaid(cost?.paid ?? false);
       setIsRecurring(false);
       setAssignment(cost?.clientId ?? GENERAL_VALUE);
+      setApplyToFuture(false);
     }
     setOpen(nextOpen);
   }
@@ -97,12 +103,24 @@ export function CostFormDialog({
       const result = cost
         ? await updateCostAction(cost.id, formData)
         : await createCostAction(formData);
-      if (result.ok) {
-        toast.success(result.message);
-        setOpen(false);
-      } else {
+      if (!result.ok) {
         toast.error(result.error);
+        return;
       }
+      // koszt cykliczny + „zastosuj w kolejnych miesiącach": po zapisie propaguj
+      // kwotę na szablon i przyszłe kopie (updateRecurringCopyAmountAction "future")
+      if (cost?.recurringCostId && applyToFuture && amounts) {
+        const prop = await updateRecurringCopyAmountAction(cost.id, amounts.netGr, "future");
+        if (!prop.ok) {
+          toast.error(prop.error);
+          setOpen(false);
+          return;
+        }
+        toast.success(prop.message);
+      } else {
+        toast.success(result.message);
+      }
+      setOpen(false);
     });
   }
 
@@ -297,10 +315,27 @@ export function CostFormDialog({
               jest jeszcze cykliczny (żeby dało się go „ucyklicznić" po fakcie).
               Koszt już z szablonu — tylko informacja. */}
           {cost?.recurringCostId ? (
-            <p className="rounded-xl border bg-muted/30 p-3 text-xs text-muted-foreground">
-              Ten koszt jest cykliczny (z szablonu). Kwotę, termin i koniec generowania
-              zmienisz w „Koszty cykliczne".
-            </p>
+            <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
+              <p className="text-xs text-muted-foreground">
+                Ten koszt jest cykliczny (z szablonu). Termin i koniec generowania zmienisz
+                w „Koszty cykliczne".
+              </p>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  id="applyToFuture"
+                  checked={applyToFuture}
+                  onCheckedChange={(c) => setApplyToFuture(c === true)}
+                  className="mt-0.5"
+                />
+                <span>
+                  Zmień kwotę także we wszystkich kolejnych miesiącach
+                  <span className="block text-xs text-muted-foreground">
+                    Zaktualizuje szablon i przyszłe (nieopłacone) kopie. Bez zaznaczenia —
+                    zmiana tylko w tym miesiącu.
+                  </span>
+                </span>
+              </label>
+            </div>
           ) : (
             <div className="space-y-3 rounded-xl border bg-muted/30 p-3">
               <div className="flex items-center gap-2">
