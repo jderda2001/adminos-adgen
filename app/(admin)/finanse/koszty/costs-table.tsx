@@ -1,12 +1,16 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ColumnDef } from "@tanstack/react-table";
 import {
   ArrowRight,
+  CircleDot,
   CircleX,
+  Coins,
+  CopyPlus,
   Download,
+  FolderTree,
   Info,
   Megaphone,
   MessageSquare,
@@ -34,9 +38,18 @@ import { KpiCard } from "@/components/kpi-card";
 import { PeriodFilter } from "@/components/period-filter";
 import { StatusBadge, costTone } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { TableCell } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -90,6 +103,11 @@ import {
   updateRecurringCopyAmountAction,
   addCostCommentAction,
   deleteCostCommentAction,
+  bulkDeleteCostsAction,
+  bulkSetCostStatusAction,
+  bulkSetCostCategoryAction,
+  bulkSetCostAmountAction,
+  bulkDuplicateCostsAction,
 } from "./actions";
 import { CostFormDialog, type SelectOption } from "./cost-form";
 import { categoryBadgeClass, categoryPillClass } from "./category-color";
@@ -471,6 +489,13 @@ function CostComments({
   );
 }
 
+// statusy oferowane w masowej zmianie statusu płatności
+const BULK_COST_STATUSES: CostStatus[] = ["APPROVED", "PAID", "DELAYED", "NONE"];
+
+// wspólny styl przycisku w ciemnej belce akcji masowych
+const BULK_BAR_BTN =
+  "inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium text-neutral-100 transition-colors hover:bg-white/10 disabled:opacity-40";
+
 export function CostsTable({
   costs,
   categories,
@@ -514,6 +539,12 @@ export function CostsTable({
   const [recurringNet, setRecurringNet] = useState<{ cost: CostRow; netGr: number } | null>(null);
   const [toDelete, setToDelete] = useState<CostRow | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // ── Zaznaczanie pozycji (akcje masowe, styl ClickUp) ──────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkAmountOpen, setBulkAmountOpen] = useState(false);
+  const [bulkNet, setBulkNet] = useState("");
 
   const kategoria = searchParams.get("kategoria") ?? "all";
   const przypisanie = searchParams.get("przypisanie") ?? "all";
@@ -567,6 +598,59 @@ export function CostsTable({
     [filtered]
   );
 
+  // ── Zaznaczanie: pomocnicze ───────────────────────────────────────
+  // realne koszty (bez wierszy-widm auto-budżetu i planowanych kopii cyklu)
+  const selectableIds = useMemo(
+    () => filtered.filter((c) => !c.autoAdBudget && !c.planned).map((c) => c.id),
+    [filtered]
+  );
+  // po zmianie danych/filtrów usuń z zaznaczenia nieistniejące ID
+  useEffect(() => {
+    const valid = new Set(selectableIds);
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (valid.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [selectableIds]);
+
+  const selectedCount = selectedIds.size;
+  const headerChecked: boolean | "indeterminate" =
+    selectableIds.length > 0 && selectedCount === selectableIds.length
+      ? true
+      : selectedCount > 0
+        ? "indeterminate"
+        : false;
+  function toggleOne(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      checked ? next.add(id) : next.delete(id);
+      return next;
+    });
+  }
+  function toggleAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(selectableIds) : new Set());
+  }
+  function clearSelection() {
+    setSelectedIds(new Set());
+  }
+  const selectedIdList = () => [...selectedIds];
+  function runBulk(action: () => Promise<ActionResult>) {
+    startTransition(async () => {
+      const r = await action();
+      if (r.ok) {
+        toast.success(r.message);
+        clearSelection();
+      } else {
+        toast.error(r.error);
+      }
+    });
+  }
+
   // KPI: netto (okres), do zapłaty (niezapłacone brutto), zaległe (po terminie)
   const kpi = useMemo(() => {
     const today = todayUTC();
@@ -609,6 +693,37 @@ export function CostsTable({
 
   const columns: ColumnDef<CostRow>[] = useMemo(
     () => [
+      {
+        id: "select",
+        enableSorting: false,
+        header: () => (
+          <Checkbox
+            aria-label="Zaznacz wszystkie"
+            checked={headerChecked}
+            onCheckedChange={(c) => toggleAll(c === true)}
+          />
+        ),
+        cell: ({ row }) => {
+          const c = row.original;
+          if (c.autoAdBudget || c.planned) return null; // wiersze-widma — nie do zaznaczenia
+          const checked = selectedIds.has(c.id);
+          return (
+            <div className="flex items-center" onClick={(e) => e.stopPropagation()}>
+              <Checkbox
+                aria-label={`Zaznacz: ${c.supplierName}`}
+                checked={checked}
+                onCheckedChange={(v) => toggleOne(c.id, v === true)}
+                className={cn(
+                  "transition-opacity",
+                  checked
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                )}
+              />
+            </div>
+          );
+        },
+      },
       {
         id: "approval",
         header: "Status",
@@ -770,7 +885,8 @@ export function CostsTable({
           ),
       },
     ],
-    [categories, currentUserId, authDisabled]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [categories, currentUserId, authDisabled, selectedIds, headerChecked, selectableIds]
   );
 
   return (
@@ -953,11 +1069,13 @@ export function CostsTable({
           cn(
             "group",
             row.autoAdBudget &&
-              "bg-purple-50/70 hover:bg-purple-50 dark:bg-purple-950/25 dark:hover:bg-purple-950/40"
+              "bg-purple-50/70 hover:bg-purple-50 dark:bg-purple-950/25 dark:hover:bg-purple-950/40",
+            selectedIds.has(row.id) && "bg-primary/5"
           )
         }
         footer={
           <>
+            <TableCell />
             <TableCell colSpan={3} className="font-medium">
               Suma ({filtered.length}{" "}
               {pluralPl(filtered.length, "pozycja", "pozycje", "pozycji")})
@@ -989,6 +1107,206 @@ export function CostsTable({
           </EmptyState>
         }
       />
+
+      {/* ── Belka akcji masowych (pojawia się przy zaznaczeniu) ── */}
+      {selectedCount > 0 && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/10 bg-neutral-900 p-1.5 text-neutral-100 shadow-2xl dark:bg-neutral-800">
+            <span className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-1.5 text-sm font-medium">
+              {selectedCount} {pluralPl(selectedCount, "pozycja", "pozycje", "pozycji")}
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="grid size-4 place-items-center rounded text-neutral-400 transition-colors hover:text-white"
+                aria-label="Wyczyść zaznaczenie"
+              >
+                <X className="size-4" />
+              </button>
+            </span>
+            <div className="mx-1 h-6 w-px bg-white/15" />
+
+            {/* Status płatności */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={pending} className={BULK_BAR_BTN}>
+                  <CircleDot className="size-4" /> Status
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="center">
+                <DropdownMenuLabel>Ustaw status</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {BULK_COST_STATUSES.map((s) => (
+                  <DropdownMenuItem
+                    key={s}
+                    onClick={() =>
+                      runBulk(() => bulkSetCostStatusAction(selectedIdList(), s))
+                    }
+                  >
+                    <StatusBadge tone={statusTone(s)}>
+                      {COST_APPROVAL_LABELS[s]}
+                    </StatusBadge>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Kategoria */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={pending} className={BULK_BAR_BTN}>
+                  <FolderTree className="size-4" /> Kategoria
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                side="top"
+                align="center"
+                className="max-h-72 overflow-y-auto"
+              >
+                <DropdownMenuLabel>Ustaw kategorię</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {categories.map((c) => (
+                  <DropdownMenuItem
+                    key={c.id}
+                    onClick={() =>
+                      runBulk(() => bulkSetCostCategoryAction(selectedIdList(), c.id))
+                    }
+                  >
+                    <span className={categoryPillClass(c.name)}>{c.name}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            {/* Kwota */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => {
+                setBulkNet("");
+                setBulkAmountOpen(true);
+              }}
+              className={BULK_BAR_BTN}
+            >
+              <Coins className="size-4" /> Kwota
+            </button>
+
+            {/* Duplikuj na kolejne miesiące */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" disabled={pending} className={BULK_BAR_BTN}>
+                  <CopyPlus className="size-4" /> Duplikuj
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="center">
+                <DropdownMenuLabel>Skopiuj na przyszłość</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateCostsAction(selectedIdList(), 1))
+                  }
+                >
+                  Następny miesiąc
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateCostsAction(selectedIdList(), 3))
+                  }
+                >
+                  Kolejne 3 miesiące
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    runBulk(() => bulkDuplicateCostsAction(selectedIdList(), 6))
+                  }
+                >
+                  Kolejne 6 miesięcy
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <div className="mx-1 h-6 w-px bg-white/15" />
+
+            {/* Usuń */}
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => setBulkDeleteOpen(true)}
+              className={cn(
+                BULK_BAR_BTN,
+                "text-red-300 hover:bg-red-500/20 hover:text-red-200"
+              )}
+            >
+              <Trash2 className="size-4" /> Usuń
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Masowe: potwierdzenie usunięcia */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Usunąć zaznaczone koszty?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Usuniesz {selectedCount}{" "}
+              {pluralPl(selectedCount, "pozycję", "pozycje", "pozycji")} kosztów. Tej
+              operacji nie można cofnąć.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Anuluj</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                runBulk(() => bulkDeleteCostsAction(selectedIdList()));
+                setBulkDeleteOpen(false);
+              }}
+            >
+              Usuń
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Masowe: kwota netto */}
+      <Dialog open={bulkAmountOpen} onOpenChange={setBulkAmountOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Ustaw kwotę netto</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="bulk-cost-net" className="text-sm font-medium">
+              Kwota netto (zł)
+            </label>
+            <Input
+              id="bulk-cost-net"
+              value={bulkNet}
+              onChange={(e) => setBulkNet(e.target.value)}
+              placeholder="12 000,00"
+              inputMode="decimal"
+            />
+            <p className="text-xs text-muted-foreground">
+              Ustawi tę samą kwotę netto w {selectedCount}{" "}
+              {pluralPl(selectedCount, "zaznaczonej pozycji", "zaznaczonych pozycjach", "zaznaczonych pozycjach")}.
+              VAT/brutto policzone wg stawki VAT każdej pozycji.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkAmountOpen(false)}>
+              Anuluj
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                runBulk(() => bulkSetCostAmountAction(selectedIdList(), bulkNet));
+                setBulkAmountOpen(false);
+              }}
+            >
+              Zapisz
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Panel szczegółów kosztu ─────────────────────────────── */}
       <DetailSheet

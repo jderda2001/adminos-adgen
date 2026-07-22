@@ -541,6 +541,194 @@ export async function deleteCostAction(id: string): Promise<ActionResult> {
   return ok("Koszt został usunięty");
 }
 
+// ── Akcje masowe (zaznaczone koszty) ─────────────────────────────────
+// Belka akcji z listy kosztów operuje na tablicy ID. Wiersze-widma (auto
+// „Budżet reklamowy") i zaplanowane przyszłe kopie cykliczne nie są realnymi
+// dokumentami — UI ich nie zaznacza, a walidacja i tak działa po znalezionych.
+
+const costIdsSchema = z
+  .array(z.string().trim().min(1))
+  .min(1, "Nie zaznaczono żadnej pozycji")
+  .max(500, "Zbyt wiele pozycji naraz (limit 500)");
+
+/** Przesunięcie daty o N miesięcy (UTC), z docięciem dnia do końca miesiąca. */
+function addMonthsUTC(date: Date, months: number): Date {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth() + months;
+  const day = date.getUTCDate();
+  const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m, Math.min(day, lastDay)));
+}
+
+/** Odmiana „koszt" po liczbie (1 koszt / 2 koszty / 5 kosztów). */
+function pluralCosts(n: number): string {
+  const abs = Math.abs(n) % 100;
+  const last = abs % 10;
+  if (abs > 10 && abs < 20) return "kosztów";
+  if (last > 1 && last < 5) return "koszty";
+  if (last === 1) return "koszt";
+  return "kosztów";
+}
+const costsCount = (n: number) => `${n} ${pluralCosts(n)}`;
+
+export async function bulkDeleteCostsAction(ids: string[]): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = costIdsSchema.safeParse(ids);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Błędne dane");
+
+  const costs = await db.cost.findMany({
+    where: { id: { in: parsed.data } },
+    select: { id: true, attachmentPath: true },
+  });
+  if (costs.length === 0) return fail("Nie znaleziono pozycji do usunięcia");
+
+  for (const c of costs) await removeAttachmentFile(c.attachmentPath);
+  const { count } = await db.cost.deleteMany({
+    where: { id: { in: costs.map((c) => c.id) } },
+  });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  return ok(`Usunięto ${costsCount(count)}`);
+}
+
+export async function bulkSetCostStatusAction(
+  ids: string[],
+  status: "NONE" | "APPROVED" | "DELAYED" | "PAID"
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = costIdsSchema.safeParse(ids);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Błędne dane");
+  if (!["NONE", "APPROVED", "DELAYED", "PAID"].includes(status)) {
+    return fail("Nieznany status");
+  }
+  const where = { id: { in: parsed.data } };
+
+  if (status === "PAID") {
+    await db.cost.updateMany({
+      where,
+      data: { paid: true, paidDate: todayUTC(), delayed: false },
+    });
+  } else {
+    await db.cost.updateMany({
+      where,
+      data: {
+        paid: false,
+        paidDate: null,
+        approvedForPayment: status === "APPROVED",
+        delayed: status === "DELAYED",
+      },
+    });
+  }
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  return ok(`Zmieniono status (${costsCount(parsed.data.length)})`);
+}
+
+export async function bulkSetCostCategoryAction(
+  ids: string[],
+  categoryId: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = costIdsSchema.safeParse(ids);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Błędne dane");
+  const cat = await db.costCategory.findUnique({ where: { id: categoryId } });
+  if (!cat) return fail("Wybrana kategoria nie istnieje");
+
+  const { count } = await db.cost.updateMany({
+    where: { id: { in: parsed.data } },
+    data: { categoryId },
+  });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  return ok(`Zmieniono kategorię na „${cat.name}" (${costsCount(count)})`);
+}
+
+export async function bulkSetCostAmountAction(
+  ids: string[],
+  net: string
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = costIdsSchema.safeParse(ids);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Błędne dane");
+  const netGr = parseMoneyToGr(net);
+  if (netGr === null || netGr < 0) {
+    return fail("Podaj poprawną kwotę netto, np. 12 000,00");
+  }
+
+  // każda pozycja zachowuje własną stawkę VAT — VAT/brutto liczymy per wiersz
+  const rows = await db.cost.findMany({
+    where: { id: { in: parsed.data } },
+    select: { id: true, vatRate: true },
+  });
+  if (rows.length === 0) return fail("Nie znaleziono pozycji");
+
+  await db.$transaction(
+    rows.map((r) => {
+      const vr: VatRate = isVatRate(r.vatRate) ? r.vatRate : "23";
+      const { vatGr, grossGr } = computeVatFromNet(netGr, vr);
+      return db.cost.update({ where: { id: r.id }, data: { netGr, vatGr, grossGr } });
+    })
+  );
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  return ok(`Ustawiono kwotę netto (${costsCount(rows.length)})`);
+}
+
+export async function bulkDuplicateCostsAction(
+  ids: string[],
+  months: number
+): Promise<ActionResult> {
+  await requireAdmin();
+  const parsed = costIdsSchema.safeParse(ids);
+  if (!parsed.success) return fail(parsed.error.issues[0]?.message ?? "Błędne dane");
+  const n = Number.isInteger(months) ? months : 1;
+  if (n < 1 || n > 12) return fail("Podaj liczbę miesięcy 1–12");
+
+  const costs = await db.cost.findMany({ where: { id: { in: parsed.data } } });
+  if (costs.length === 0) return fail("Nie znaleziono pozycji do duplikowania");
+
+  // kopie na kolejne 1..N miesięcy: świeże (niezapłacone, bez zatwierdzenia,
+  // bez załącznika/partii importu/powiązania z cyklem); data +N miesięcy.
+  const data = costs.flatMap((c) =>
+    Array.from({ length: n }, (_, k) => {
+      const shift = k + 1;
+      return {
+        supplierName: c.supplierName,
+        supplierAccount: c.supplierAccount,
+        docNumber: c.docNumber,
+        docDate: addMonthsUTC(c.docDate, shift),
+        dueDate: c.dueDate ? addMonthsUTC(c.dueDate, shift) : null,
+        netGr: c.netGr,
+        vatRate: c.vatRate,
+        vatGr: c.vatGr,
+        grossGr: c.grossGr,
+        categoryId: c.categoryId,
+        clientId: c.clientId,
+        paid: false,
+        paidDate: null,
+        approvedForPayment: false,
+        delayed: false,
+        needsConfirmation: false,
+        note: c.note,
+      };
+    })
+  );
+  const { count } = await db.cost.createMany({ data });
+
+  revalidatePath(KOSZTY_PATH);
+  revalidatePath(ESTYMACJE_PATH);
+  revalidatePath("/platnosci");
+  const label = n === 1 ? "na następny miesiąc" : `na kolejne ${n} miesiące`;
+  return ok(`Zduplikowano ${costsCount(count)} ${label}`);
+}
+
 // ── Komentarze do kosztu (historia z autorem) ───────────────────────
 
 export async function addCostCommentAction(
